@@ -62,13 +62,32 @@ async function getFileset(onProgress?: ProgressHandler, detector?: DetectorKind)
 }
 
 /** 带进度的模型下载。SW 命中缓存时会瞬间完成。 */
+export class ModelLoadError extends Error {
+  readonly detector: DetectorKind
+  constructor(detector: DetectorKind, message: string) {
+    super(message)
+    this.name = 'ModelLoadError'
+    this.detector = detector
+  }
+}
+
 async function fetchModel(
   kind: DetectorKind,
   onProgress?: ProgressHandler,
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
-  const res = await fetch(MODEL_URLS[kind], { signal })
-  if (!res.ok) throw new Error(`模型下载失败（HTTP ${res.status}）`)
+  let res: Response
+  try {
+    res = await fetch(MODEL_URLS[kind], { signal })
+  } catch (e) {
+    // 网络层失败（断网、被拦截、CORS）抛的是 TypeError('Failed to fetch')，
+    // 直接透给用户毫无意义 —— 换成能看懂的话
+    if (e instanceof Error && e.name === 'AbortError') throw e
+    throw new ModelLoadError(kind, '模型没下下来，检查一下网络再重试')
+  }
+  if (!res.ok) {
+    throw new ModelLoadError(kind, `模型下载失败（HTTP ${res.status}），稍后再试`)
+  }
 
   const total = Number(res.headers.get('content-length')) || MODEL_BYTES[kind]
 

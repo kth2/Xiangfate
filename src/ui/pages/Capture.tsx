@@ -4,6 +4,7 @@ import { getTypeSpec, isAnalysisType, type ShotSpec } from '@/core/registry'
 import { captureVideoFrame, loadImageFile } from '@/core/image'
 import { formatMb, totalBytes } from '@/mediapipe/loader'
 import { detect, eulerFromMatrix, NoSubjectError, type DetectResult } from '@/mediapipe/detect'
+import { buildMianxiangEnvelope } from '@/modules/mianxiang/pipeline'
 import { useAnalysis } from '@/store/analysis.store'
 import { CAPTURE_PRIVACY } from '@/copy/disclaimer.zh-CN'
 import {
@@ -12,7 +13,7 @@ import {
   POSE_CONNECTIONS,
 } from '../components/LandmarkOverlay'
 
-type Stage = 'intro' | 'pick' | 'loading' | 'detecting' | 'result'
+type Stage = 'intro' | 'pick' | 'loading' | 'detecting' | 'result' | 'building'
 
 export function Capture() {
   const { type } = useParams()
@@ -22,6 +23,9 @@ export function Capture() {
   const shots = useAnalysis((s) => s.shots)
   const addShot = useAnalysis((s) => s.addShot)
   const start = useAnalysis((s) => s.start)
+  const setEnvelope = useAnalysis((s) => s.setEnvelope)
+  const subject = useAnalysis((s) => s.subject)
+  const releaseBitmaps = useAnalysis((s) => s.releaseBitmaps)
 
   const [stage, setStage] = useState<Stage>(spec?.caveat ? 'intro' : 'pick')
   const [shotIndex, setShotIndex] = useState(0)
@@ -141,20 +145,46 @@ export function Capture() {
   }
 
   function nextShot() {
-    setResult(null)
-    setPreview(null)
     const next = shotIndex + 1
     if (next < spec!.shots.length) {
+      setResult(null)
+      setPreview(null)
       setShotIndex(next)
       setStage('pick')
-    } else {
-      void navigate(`/report`)
+      return
     }
+    finish()
   }
 
   function skipOptional() {
-    // 跳过可选机位 → 直接去出报告
-    void navigate('/report')
+    finish()
+  }
+
+  /**
+   * 收尾：把关键点 + 图像跑成 AnalysisEnvelope。
+   * 目前只有面相接了完整管线；其余三类到第三步后续再接。
+   */
+  function finish() {
+    const shot = useAnalysis.getState().shots[0]
+    if (spec!.type !== 'mianxiang' || !shot || !result) {
+      void navigate('/report')
+      return
+    }
+    setStage('building')
+    try {
+      const env = buildMianxiangEnvelope({
+        detection: result,
+        bitmap: shot.bitmap,
+        subject,
+      })
+      setEnvelope(env)
+      // 位图使命已尽，立刻释放 —— 它绝不进入任何持久化
+      releaseBitmaps()
+      void navigate('/report')
+    } catch (e) {
+      setStage('result')
+      setError(e instanceof Error ? e.message : '特征计算失败，换一张照片试试')
+    }
   }
 
   function retake() {
@@ -261,9 +291,20 @@ export function Capture() {
           </dl>
         </div>
 
-        <p className="mb-6 text-[12px] leading-relaxed text-subtle">
-          特征计算与规则映射将在下一步接入。当前版本已跑通「拍照 → 端侧检测 → 关键点可视化」。
-        </p>
+        {error && (
+          <p
+            className="mb-5 border-l-2 py-2 pl-3 text-[13px] leading-relaxed"
+            style={{ borderColor: 'var(--color-cinnabar-500)' }}
+          >
+            {error}
+          </p>
+        )}
+
+        {spec.type !== 'mianxiang' && (
+          <p className="mb-6 text-[12px] leading-relaxed text-subtle">
+            {spec.name}的特征计算尚在接入中。当前版本已跑通「拍照 → 端侧检测 → 关键点可视化」。
+          </p>
+        )}
 
         <div className="mt-auto flex gap-3">
           <button type="button" onClick={retake} className="btn-outline h-12 flex-1 text-[15px]">
@@ -278,9 +319,11 @@ export function Capture() {
   }
 
   /* ---------------- 加载 / 检测中 ---------------- */
-  if (stage === 'loading' || stage === 'detecting') {
+  if (stage === 'loading' || stage === 'detecting' || stage === 'building') {
     const phaseLabel =
-      progress?.phase === 'wasm'
+      stage === 'building'
+        ? '正在计算特征'
+        : progress?.phase === 'wasm'
         ? '正在准备检测引擎'
         : progress?.phase === 'model'
           ? '正在下载模型'
