@@ -28,9 +28,14 @@
 ## 当前进度
 
 - [x] **第一步：研究与总结** —— 见 [`docs/`](./docs)
-- [ ] 第二步：项目初始化
-- [ ] 第三步：核心功能开发
+- [x] **第二步：项目初始化** —— 首页四入口 · 端侧检测跑通 · PWA 骨架 · BYO Key 设置
+- [ ] 第三步：核心功能开发（特征提取 → 规则映射 → AI 解读 → 追问）
 - [ ] 第四步：体验与上线准备
+
+**第二步已跑通的链路**：选类型 → 拍照/上传 → EXIF 剥离 + 缩放 → 按需下载对应模型
+（带进度）→ 端侧关键点检测 → 关键点可视化 + 姿态角/手别/置信度。
+
+实测：首屏 JS ≈ 100 KB gzip，应用壳预缓存 489 KiB，MediaPipe 全部懒加载。
 
 ---
 
@@ -87,13 +92,22 @@
 
 ## 本地运行
 
-> 第二步完成后补充完整步骤。
+```bash
+npm install     # postinstall 会把 MediaPipe wasm 复制到 public/mediapipe/wasm
+npm run dev     # http://localhost:5173
+```
+
+首次打开会有一个免责声明确认页。AI Key 在应用内的「设置」页填写，不需要 `.env`。
 
 ```bash
-npm install
-cp .env.example .env.local   # 填入 AI API Key
-npm run dev
+npm run typecheck   # tsc -b
+npm test            # vitest：schema 一致性 + 分档边界 + 注册表约束
+npm run build       # 产物在 dist/
+npm run preview
 ```
+
+> `public/mediapipe/` 由 `scripts/copy-mediapipe-wasm.mjs` 生成（约 34 MB），已 gitignore。
+> 之所以不走 CDN：走自己的域名才能真正离线可用。
 
 ### 关于 API Key
 

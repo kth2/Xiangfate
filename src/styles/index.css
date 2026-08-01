@@ -1,0 +1,225 @@
+@import 'tailwindcss';
+
+/* ============================================================
+   相由 · 新中式设计系统
+   宣纸为底，焦墨为文，朱砂点睛，赭金勾边。
+   暗色为默认（相术宜静），亮色为宣纸质感。
+   ============================================================ */
+
+@theme {
+  /* —— 墨色（文字与暗底）—— */
+  --color-ink-900: #14120f; /* 焦墨 · 暗色底 */
+  --color-ink-800: #1c1a17;
+  --color-ink-700: #262320;
+  --color-ink-600: #34302b;
+  --color-ink-500: #4a443c;
+  --color-ink-400: #6b6358;
+  --color-ink-300: #8f8577;
+
+  /* —— 宣纸（亮底与暗色文字）—— */
+  --color-paper-50: #faf7f0;
+  --color-paper-100: #f5f1e8; /* 宣纸本色 */
+  --color-paper-200: #ebe4d6;
+  --color-paper-300: #ddd3bf;
+
+  /* —— 朱砂（主强调 · 印章 · 关键动作）—— */
+  --color-cinnabar-400: #c4403a;
+  --color-cinnabar-500: #9e2b25; /* 朱砂正色 */
+  --color-cinnabar-600: #7d201b;
+
+  /* —— 赭金（次强调 · 边饰 · 星级）—— */
+  --color-gold-300: #d9c08c;
+  --color-gold-400: #c8a96a;
+  --color-gold-500: #a8894c;
+
+  /* —— 黛青（辅助 · 信息）—— */
+  --color-dai-300: #6b7d88;
+  --color-dai-400: #4d5f6b;
+  --color-dai-500: #3d4a54;
+
+  /* —— 四相配色 —— */
+  --color-mian: #9e2b25; /* 面相 · 朱砂 */
+  --color-shou: #a8894c; /* 手相 · 赭金 */
+  --color-gu: #4d5f6b; /* 骨相 · 黛青 */
+  --color-ti: #5f6b4d; /* 体相 · 苔绿 */
+
+  /* —— 字体：全部走系统字体，不请求任何外部资源 —— */
+  --font-serif-cn: 'Songti SC', 'Source Han Serif SC', 'Noto Serif CJK SC', 'STSong', 'SimSun',
+    'Georgia', serif;
+  --font-sans-cn: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif;
+
+  --radius-seal: 2px; /* 印章方正 */
+}
+
+/* 亮色（宣纸）模式变量 */
+:root {
+  --bg-base: var(--color-ink-900);
+  --bg-raised: var(--color-ink-800);
+  --bg-sunken: #100e0c;
+  --fg-base: var(--color-paper-100);
+  --fg-muted: var(--color-ink-300);
+  --fg-subtle: var(--color-ink-400);
+  --line: rgb(255 255 255 / 0.08);
+  --line-strong: rgb(200 169 106 / 0.28);
+  --grain-opacity: 0.035;
+}
+
+html:not(.dark) {
+  --bg-base: var(--color-paper-100);
+  --bg-raised: var(--color-paper-50);
+  --bg-sunken: var(--color-paper-200);
+  --fg-base: var(--color-ink-800);
+  --fg-muted: var(--color-ink-500);
+  --fg-subtle: var(--color-ink-400);
+  --line: rgb(28 26 23 / 0.1);
+  --line-strong: rgb(168 137 76 / 0.35);
+  --grain-opacity: 0.045;
+}
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html {
+    background-color: var(--bg-base);
+    /* 避免 iOS 回弹露出白底 */
+    overscroll-behavior-y: none;
+  }
+
+  body {
+    background-color: var(--bg-base);
+    color: var(--fg-base);
+    font-family: var(--font-sans-cn);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    min-height: 100dvh;
+  }
+
+  /* 宣纸纹理：SVG 噪声，内联 data URI，无外部请求 */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: var(--grain-opacity);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-title {
+    font-family: var(--font-serif-cn);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+
+  ::selection {
+    background: var(--color-cinnabar-500);
+    color: var(--color-paper-100);
+  }
+}
+
+@layer components {
+  /* 页面容器：为刘海屏留安全区 */
+  .page {
+    position: relative;
+    z-index: 1;
+    min-height: 100dvh;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* 卡片：宣纸浮起 + 细金边 */
+  .card {
+    background-color: var(--bg-raised);
+    border: 1px solid var(--line);
+    border-radius: 0.75rem;
+  }
+
+  /* 朱砂印章式主按钮 */
+  .btn-seal {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    background-color: var(--color-cinnabar-500);
+    color: var(--color-paper-50);
+    font-family: var(--font-serif-cn);
+    letter-spacing: 0.15em;
+    border-radius: var(--radius-seal);
+    transition: background-color 0.2s ease, transform 0.1s ease;
+  }
+  .btn-seal:active {
+    transform: scale(0.98);
+    background-color: var(--color-cinnabar-600);
+  }
+  .btn-seal:disabled {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+
+  /* 描边按钮 */
+  .btn-outline {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border: 1px solid var(--line-strong);
+    color: var(--fg-base);
+    font-family: var(--font-serif-cn);
+    letter-spacing: 0.1em;
+    border-radius: var(--radius-seal);
+    transition: background-color 0.2s ease;
+  }
+  .btn-outline:active {
+    background-color: var(--bg-sunken);
+  }
+
+  /* 回纹分隔线（新中式常见的雷纹意象，用渐变简化） */
+  .rule-gold {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--color-gold-500) 20%,
+      var(--color-gold-400) 50%,
+      var(--color-gold-500) 80%,
+      transparent
+    );
+    opacity: 0.5;
+  }
+
+  /* 竖排标题（首页主标题用） */
+  .vertical-cn {
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    letter-spacing: 0.35em;
+  }
+
+  .text-muted {
+    color: var(--fg-muted);
+  }
+  .text-subtle {
+    color: var(--fg-subtle);
+  }
+  .border-line {
+    border-color: var(--line);
+  }
+}
+
+@layer utilities {
+  /* 尊重用户的减少动效偏好 */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

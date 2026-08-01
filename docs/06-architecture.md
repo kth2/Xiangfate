@@ -26,13 +26,15 @@
 
 用户要求「如果某个技术点有更好的现代替代方案，可以提出并说明理由后采用」，以下是四点建议：
 
-#### ① 路由用 TanStack Router，不用 React Router
+#### ① 路由：最终选了 React Router 7（原提案是 TanStack Router）
 
-**理由**：分析流程是强线性的（选类型 → 拍照 → 提取 → 报告 → 追问），每一步都要携带
-`analysisId` 与阶段状态。TanStack Router 的类型安全 search params 能把这套流程状态直接
-放进 URL 并获得完整类型推导，刷新不丢失、可分享中间态。React Router 需要手写一层
-校验。差异不大，但对这个场景更贴合。
-**若不采纳**：React Router 7 完全够用，不构成阻塞。
+**原提案理由**：分析流程强线性，TanStack Router 的类型安全 search params 能把流程状态
+放进 URL 并获得完整类型推导。
+
+**实际落地时改了主意**：分析会话状态实际住在 Zustand（`analysis.store`），URL 只需要
+携带 `analysisType` 一个参数。类型安全 search params 的收益因此很有限，不值得多一层
+codegen 与心智负担。已采用 **React Router 7**（`createBrowserRouter` + 路由级
+`lazy` 分包）。
 
 #### ② 掌纹管线自研，不引入 OpenCV.js
 
@@ -257,9 +259,17 @@ FollowUpChat（多轮追问）
 | 项 | 方案 |
 |---|---|
 | Service Worker | `vite-plugin-pwa`（Workbox） |
-| 应用壳 | Precache，`registerType: 'autoUpdate'` |
-| MediaPipe WASM | Precache（约 3 MB，四类共用） |
+| 应用壳 | Precache，`registerType: 'autoUpdate'`。实测 **489 KiB / 19 项** |
+| MediaPipe WASM | **不 precache**。实测单个 `vision_wasm_internal.wasm` 就有 **11.7 MB**（远超原估的 3 MB），改为 `CacheFirst` 运行时缓存 |
 | `.task` 模型文件 | **不 precache**（共 17 MB）。用 `CacheFirst` 运行时缓存，`maxAgeSeconds: 90 天`。首次用到某类型才下载 |
+
+**WASM 的加载方式（实现时踩到的坑）**：
+`@mediapipe/tasks-vision` 的 `exports` 字段**没有导出 `./wasm` 目录**，
+`new URL('@mediapipe/tasks-vision/wasm', import.meta.url)` 会直接构建失败。
+两条出路：走 jsDelivr CDN，或复制到自己的 `public/`。
+**选了后者** —— 走自己的域名才能真正离线可用，也不受第三方 CDN 可用性影响。
+由 `scripts/copy-mediapipe-wasm.mjs` 在 `postinstall` / `prebuild` 时从 `node_modules`
+复制到 `public/mediapipe/wasm/`（约 34 MB，已 gitignore，不入库）。
 | 离线能力 | 应用壳 + 已缓存模型可离线做特征提取；AI 解读需联网，离线时把 envelope 存入队列，联网后提示继续 |
 | 安装引导 | 捕获 `beforeinstallprompt`；iOS 单独出「添加到主屏幕」图文引导（iOS 不支持该事件） |
 
@@ -272,8 +282,8 @@ FollowUpChat（多轮追问）
 
 | 阶段 | 目标 | 手段 |
 |---|---|---|
-| 首屏 JS | < 200 KB gzip | 路由级 code split；MediaPipe 与 cv 全部动态 import |
-| 模型加载（首次） | 面相 3.8 MB / 手相 7.8 MB / 体相 5.8 MB | 懒加载 + 进度条 + Cache 持久化 |
+| 首屏 JS | < 200 KB gzip | 路由级 code split；MediaPipe 与 cv 全部动态 import。**实测 ≈ 100 KB gzip** ✅ |
+| 模型加载（首次） | 面相 3.6 MB / 手相 7.5 MB / 体相 5.5 MB（+ wasm 11.7 MB，四类共用一次） | 懒加载 + 进度条 + Cache 持久化 |
 | 模型加载（二次） | < 300 ms | Cache Storage |
 | 关键点检测 | < 300 ms（IMAGE 模式） | GPU delegate，失败回落 CPU |
 | 掌纹管线 | < 500 ms | Web Worker + OffscreenCanvas + 可分离 Gabor 核 |
@@ -325,15 +335,25 @@ ALLOWED_ORIGINS=https://xiangfate.vercel.app
 
 ---
 
-## 八、第二步的执行顺序
+## 八、执行顺序与进度
 
-1. `npm create vite` + Tailwind 4 + Zustand + 路由，跑通空壳
-2. `schemas/` 落地 + `gen-types.ts` 生成 `core/types.ts`
-3. `mediapipe/loader.ts` + 三个检测器封装，验证三个模型都能在浏览器跑通
-4. `scripts/verify-landmarks.ts` 校准 478 点索引表 → 落 `mianxiang/landmarks.ts`
-5. Home 页（四入口）+ 通用 Capture 页骨架
-6. **先做面相全链路**（度量 → 规则 → JSON → Prompt → 报告），作为其他三类的模板
-7. 体相（Pose 相对简单）→ 骨相（复用面相与体相的 metrics）
-8. 手相放最后（掌纹管线最重，且需要 `cv/*` 全套算子 + 校正 UI）
-9. PWA、历史记录、设置页
-10. README + 部署
+### 第二步（已完成）
+1. ✅ Vite + React 19 + TS + Tailwind 4 + Zustand + React Router，跑通空壳
+2. ✅ `schemas/` 落地 + 手写 `core/types.ts`，用 `core/__tests__/schema.test.ts` 守住一致性
+   （手写而非 codegen：少一层构建依赖，代价是必须有测试兜底）
+3. ✅ `mediapipe/loader.ts` 懒加载 + 进度 + 释放；`mediapipe/detect.ts` 三检测器统一封装
+4. ✅ Home 页（四入口，显示各类型模型是否已缓存）
+5. ✅ 通用 Capture 页：相机 / 相册 → 质量预处理 → 端侧检测 → 关键点可视化
+6. ✅ 首启免责门、设置页（BYO Key）、关于页、深浅主题
+7. ✅ PWA manifest + SW + 图标
+
+### 第三步（下一步）
+8. `scripts/verify-landmarks.ts` 校准 478 点索引表 → 落 `mianxiang/landmarks.ts`
+9. **先做面相全链路**（度量 → 规则 → JSON → Prompt → 报告），作为其他三类的模板
+10. 体相（Pose 相对简单）→ 骨相（复用面相与体相的 metrics）
+11. 手相放最后（掌纹管线最重，且需要 `cv/*` 全套算子 + 校正 UI）
+12. `core/guard.ts` 输出后置校验、历史记录（IndexedDB）
+
+### 第四步
+13. 移动端适配打磨、权限处理、离线队列
+14. README 补全 + 部署

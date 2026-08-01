@@ -1,0 +1,18 @@
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.*
+!.env.example
+
+# MediaPipe wasm 运行时：由 scripts/copy-mediapipe-wasm.mjs 从 node_modules 复制而来
+# 约 34MB，不入库
+public/mediapipe/
+
+# 编辑器 / 系统
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.tsbuildinfo
