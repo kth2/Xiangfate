@@ -1,5 +1,10 @@
-# Cloudflare Pages / Netlify 的 header 配置
-# Vercel 用根目录的 vercel.json
+# Cloudflare 的 header 配置（Workers 静态资源 / Pages 都读这个文件）。
+# Vercel 用根目录 vercel.json，Netlify 用 netlify.toml。
+#
+# ⚠️ 这里**不要**再加 _redirects 做 SPA 回退：
+# Cloudflare 会把 /index.html 规范化成 /，`/* /index.html 200` 于是又撞回 /*，
+# 被判定为无限循环（错误码 100324），整个部署会失败。
+# SPA 回退交给 wrangler 的 not_found_handling = "single-page-application"。
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable

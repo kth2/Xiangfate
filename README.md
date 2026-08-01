@@ -119,7 +119,7 @@ npm run build       # 产物在 dist/
 npm run preview
 ```
 
-> `public/mediapipe/` 由 `scripts/copy-mediapipe-wasm.mjs` 生成（约 34 MB），已 gitignore。
+> `public/mediapipe/` 由 `scripts/copy-mediapipe-wasm.mjs` 生成（约 22 MB），已 gitignore。
 > 之所以不走 CDN：走自己的域名才能真正离线可用。
 
 ### 关于 API Key
@@ -151,18 +151,35 @@ vercel --prod
 ```
 配置在 `vercel.json`：SPA 回退、静态资源长缓存、`Permissions-Policy: camera=(self)`。
 
-### Cloudflare Pages
+### Cloudflare（Workers 静态资源 / Pages）
 
 在控制台新建项目并连上仓库，然后填：
 - **Build command**：`npm run build`
 - **Build output directory**：`dist`
 - **Node 版本**：22
 
-SPA 回退与 header 走 `public/_redirects` 与 `public/_headers`（构建时会被复制进 `dist/`）。
+Header 走 `public/_headers`（构建时被复制进 `dist/`）。
+
+**SPA 回退由 `wrangler.jsonc` 的 `not_found_handling` 负责**，不要用 `_redirects`：
+
+```jsonc
+{
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
+```
+
+> ⚠️ **踩过的坑**：本项目一度在 `public/_redirects` 里放了通用的 SPA 写法
+> `/*  /index.html  200`。Cloudflare 的静态资源服务会把 `/index.html`
+> 规范化成 `/`，于是这条规则又匹配回 `/*`，被判定为无限循环，
+> 整个部署直接失败（错误码 **100324**）。
+> 现在这条规则只留在 `netlify.toml` 里，Cloudflare 和 Vercel 各用各的机制。
 
 ### Netlify
 
-连上仓库即可，`netlify.toml` 已经配好。
+连上仓库即可，`netlify.toml` 已经配好（SPA 回退 + 缓存头都在里面）。
 
 ### 部署体积说明
 
