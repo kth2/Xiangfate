@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiangfate.app/schemas/shouxiang.derived.schema.json",
+  "title": "ShouxiangDerived",
+  "description": "手相模块的综合判定。lineDetection 是本模块最关键的字段——它告诉 AI 哪些掌线真的被测到了。",
+  "type": "object",
+  "required": ["handType", "handsCaptured", "lineDetection", "mountProfile"],
+  "additionalProperties": false,
+  "properties": {
+    "handType": {
+      "type": "object",
+      "required": ["primary", "score"],
+      "additionalProperties": false,
+      "properties": {
+        "primary": { "$ref": "#/$defs/HandType" },
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "secondary": { "oneOf": [{ "$ref": "#/$defs/HandType" }, { "type": "null" }] },
+        "secondaryScore": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+      }
+    },
+    "dominantHand": {
+      "type": ["string", "null"],
+      "enum": ["left", "right", null],
+      "description": "用户自述的惯用手。"
+    },
+    "handsCaptured": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["left", "right"] },
+      "minItems": 1,
+      "maxItems": 2,
+      "uniqueItems": true
+    },
+    "lineDetection": {
+      "type": "object",
+      "description": "每条主线的检测情况。detected=false 时 AI 只能按「该线不显」来谈，不得描述其长短深浅。",
+      "required": ["生命线", "智慧线", "感情线", "命运线"],
+      "additionalProperties": false,
+      "properties": {
+        "生命线": { "$ref": "#/$defs/LineDetection" },
+        "智慧线": { "$ref": "#/$defs/LineDetection" },
+        "感情线": { "$ref": "#/$defs/LineDetection" },
+        "命运线": { "$ref": "#/$defs/LineDetection" },
+        "太阳线": { "$ref": "#/$defs/LineDetection" },
+        "婚姻线": { "$ref": "#/$defs/LineDetection" }
+      }
+    },
+    "leftRightComparison": {
+      "type": ["string", "null"],
+      "enum": ["右优于左", "左优于右", "左右相似", null],
+      "description": "仅在双手都采集时给出；否则为 null，且 AI 须说明对照暂缺。"
+    },
+    "mountProfile": {
+      "type": "object",
+      "required": ["木星丘", "土星丘", "太阳丘", "水星丘", "金星丘", "月丘", "火星丘"],
+      "additionalProperties": false,
+      "properties": {
+        "木星丘": { "$ref": "#/$defs/MountBand" },
+        "土星丘": { "$ref": "#/$defs/MountBand" },
+        "太阳丘": { "$ref": "#/$defs/MountBand" },
+        "水星丘": { "$ref": "#/$defs/MountBand" },
+        "金星丘": { "$ref": "#/$defs/MountBand" },
+        "月丘": { "$ref": "#/$defs/MountBand" },
+        "火星丘": { "$ref": "#/$defs/MountBand" }
+      }
+    }
+  },
+  "$defs": {
+    "HandType": {
+      "type": "string",
+      "enum": ["原始手", "方形手", "圆形手", "锥形手", "精神手"]
+    },
+    "MountBand": {
+      "type": "string",
+      "enum": ["very_low", "low", "balanced", "high", "very_high", "unavailable"]
+    },
+    "LineDetection": {
+      "type": "object",
+      "required": ["detected", "matchScore", "corrected"],
+      "additionalProperties": false,
+      "properties": {
+        "detected": {
+          "type": "boolean",
+          "description": "matchScore >= 0.45 或用户手动校正确认。"
+        },
+        "matchScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "位置先验打分（起点/终点/方向/曲率/长度合理性加权）。"
+        },
+        "corrected": {
+          "type": "boolean",
+          "description": "true 表示由用户在校正界面手动指定。AI 须在特征识别中标注「（经你本人确认）」。"
+        }
+      }
+    }
+  }
+}

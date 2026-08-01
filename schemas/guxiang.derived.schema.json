@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiangfate.app/schemas/guxiang.derived.schema.json",
+  "title": "GuxiangDerived",
+  "description": "骨相模块的综合判定。骨相无专用模型，全部由体表轮廓推导——unobservableBones 是硬边界，AI 禁止对其发言。",
+  "type": "object",
+  "required": [
+    "headShape",
+    "boneFleshRatio",
+    "boneFleshLabel",
+    "boneThickness",
+    "observableBones",
+    "inferredBones",
+    "unobservableBones"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "headShape": {
+      "type": "object",
+      "description": "需正面 + 侧面照共同估算颅指数；缺侧面照时 status 为 not_captured 且 value 为 null。",
+      "required": ["value", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": ["string", "null"],
+          "enum": ["圆头型", "长头型", "方头型", "扁头型", null]
+        },
+        "cephalicIndex": {
+          "type": ["number", "null"],
+          "description": "headWidth / headDepth。面部网格不覆盖颅顶与后脑，故 methodPrior 仅 0.5。"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["inferred", "not_captured"]
+        }
+      }
+    },
+    "boneFleshRatio": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "boneScore / (boneScore + fleshScore)。本模块最可靠的可测项。"
+    },
+    "boneFleshLabel": {
+      "type": "string",
+      "enum": ["骨多肉少", "骨肉相称", "骨少肉多"]
+    },
+    "boneThickness": {
+      "type": "string",
+      "enum": ["粗骨型", "中骨型", "细骨型"]
+    },
+    "observableBones": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Bone" },
+      "description": "可正常展开的骨。",
+      "uniqueItems": true
+    },
+    "inferredBones": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Bone" },
+      "description": "间接推估，AI 措辞必须弱化。",
+      "uniqueItems": true
+    },
+    "unobservableBones": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Bone" },
+      "description": "照片无法观测。AI 严禁作任何论断、暗示或泛化补充，须在特征识别末尾如实说明。",
+      "uniqueItems": true
+    },
+    "specialForms": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["虎骨", "脑后见腮"],
+        "description": "仅列出可从正面照近似判定的特殊骨相。龙骨、三台骨、反骨、耳后骨不可观测，永不出现在此。"
+      },
+      "uniqueItems": true
+    },
+    "bodyBonesCaptured": {
+      "type": "boolean",
+      "description": "是否提供了体照。false 时肩骨/脊椎/骨盆相关项进入 unavailable。"
+    }
+  },
+  "$defs": {
+    "Bone": {
+      "type": "string",
+      "enum": [
+        "颧骨", "额骨", "枕骨", "顶骨", "颞骨",
+        "鼻骨", "下颌骨", "眉骨", "耳后骨"
+      ]
+    }
+  }
+}
