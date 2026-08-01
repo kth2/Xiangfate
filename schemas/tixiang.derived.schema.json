@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiangfate.app/schemas/tixiang.derived.schema.json",
+  "title": "TixiangDerived",
+  "description": "体相模块的综合判定。所有比例基于 worldLandmarks（米制），与拍摄距离无关。绝对身高体重不参与任何价值判断。",
+  "type": "object",
+  "required": ["somatotype", "proportion", "posture", "segmentationUsed", "surveyAnswered"],
+  "additionalProperties": false,
+  "properties": {
+    "somatotype": {
+      "type": "object",
+      "description": "谢尔登体质三型的软分类。primary 无得分 >= 0.5 时应为「混合型」。",
+      "required": ["primary", "scores"],
+      "additionalProperties": false,
+      "properties": {
+        "primary": {
+          "type": "string",
+          "enum": ["内胚型", "中胚型", "外胚型", "平衡型", "混合型"]
+        },
+        "scores": {
+          "type": "object",
+          "required": ["内胚", "中胚", "外胚"],
+          "additionalProperties": false,
+          "properties": {
+            "内胚": { "type": "number", "minimum": 0, "maximum": 1 },
+            "中胚": { "type": "number", "minimum": 0, "maximum": 1 },
+            "外胚": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        }
+      }
+    },
+    "proportion": {
+      "type": "object",
+      "required": ["upperLowerRatio", "shoulderHipRatio", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "upperLowerRatio": {
+          "type": "number",
+          "description": "torsoLen / legLen（world 坐标）。"
+        },
+        "shoulderHipRatio": {
+          "type": "number",
+          "description": "shoulderWidth / hipWidth（world 坐标）。"
+        },
+        "armReachLabel": {
+          "type": ["string", "null"],
+          "enum": ["垂至大腿中部", "偏长", "偏短", null]
+        },
+        "neckLabel": {
+          "type": ["string", "null"],
+          "enum": ["长颈", "适中", "短颈", null]
+        },
+        "label": { "type": "string", "maxLength": 40 }
+      }
+    },
+    "posture": {
+      "type": "object",
+      "required": ["trunkTilt", "shoulderSlope", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "trunkTilt": { "type": "number", "description": "躯干轴与铅垂线夹角，单位度。" },
+        "shoulderSlope": { "type": "number", "description": "肩线与水平线夹角，单位度。" },
+        "weightShift": { "type": ["number", "null"] },
+        "stanceWidth": { "type": ["number", "null"] },
+        "label": {
+          "type": "string",
+          "enum": ["直立挺拔", "微微前倾", "微微后仰", "重心偏移", "体态待观察"]
+        }
+      }
+    },
+    "postureCautions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["轻度圆肩", "头部前倾", "肩线不平", "重心偏移", "站姿偏拘谨"],
+        "description": "仅作日常姿态建议。不得写成骨骼疾病或医疗矫正建议。"
+      },
+      "maxItems": 4,
+      "uniqueItems": true
+    },
+    "capturedExtent": {
+      "type": "string",
+      "enum": ["full_body", "half_body"],
+      "description": "half_body 时下肢比例与站姿重心项进入 unavailable（reason: not_captured）。"
+    },
+    "segmentationUsed": {
+      "type": "boolean",
+      "description": "是否启用 ImageSegmenter 量取胸/腰/臀轮廓宽度。true 时体型判定可靠度显著提高。"
+    },
+    "surveyAnswered": {
+      "type": "boolean",
+      "description": "用户是否填写了可选自评问卷。"
+    },
+    "survey": {
+      "type": "object",
+      "description": "可选自评。对应项在 features 中 status 必须为 self_reported，AI 须以「据你自述」引出。",
+      "additionalProperties": false,
+      "properties": {
+        "voice": { "type": "string", "enum": ["洪亮", "柔和", "低沉", "清亮"] },
+        "speechPace": { "type": "string", "enum": ["偏快", "适中", "偏慢"] },
+        "dressStyle": {
+          "type": "string",
+          "enum": ["整洁得体", "随意自然", "时尚前卫", "传统保守", "朴素简约"]
+        },
+        "heightCm": {
+          "type": ["number", "null"],
+          "description": "仅用于体型指数计算。严禁生成任何与身高相关的价值判断。"
+        },
+        "weightKg": {
+          "type": ["number", "null"],
+          "description": "仅用于体型指数计算。严禁生成任何与体重相关的价值判断。"
+        }
+      }
+    }
+  }
+}

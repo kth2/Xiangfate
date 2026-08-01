@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiangfate.app/schemas/analysis-envelope.schema.json",
+  "title": "AnalysisEnvelope",
+  "description": "端侧特征提取与 AI 解读之间的唯一契约。原图永不离开设备，只有本结构会被发送。",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "analysisType",
+    "analysisId",
+    "capturedAt",
+    "locale",
+    "capture",
+    "features",
+    "derived",
+    "unavailable",
+    "scorecard",
+    "policy"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "const": "1.0.0"
+    },
+    "analysisType": {
+      "type": "string",
+      "enum": ["mianxiang", "shouxiang", "guxiang", "tixiang"]
+    },
+    "analysisId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "capturedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "locale": {
+      "type": "string",
+      "default": "zh-CN"
+    },
+    "subject": {
+      "$ref": "#/$defs/Subject"
+    },
+    "capture": {
+      "$ref": "#/$defs/Capture"
+    },
+    "features": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/FeatureItem" },
+      "minItems": 1,
+      "maxItems": 60
+    },
+    "derived": {
+      "type": "object",
+      "description": "各分析类型专属的综合判定。结构见 <type>.derived.schema.json。",
+      "minProperties": 1
+    },
+    "raw": {
+      "$ref": "#/$defs/Raw"
+    },
+    "unavailable": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/UnavailableItem" },
+      "maxItems": 30
+    },
+    "scorecard": {
+      "$ref": "#/$defs/Scorecard"
+    },
+    "policy": {
+      "$ref": "#/$defs/Policy"
+    }
+  },
+
+  "$defs": {
+    "Subject": {
+      "type": "object",
+      "description": "全部可选，用户自愿填写。gender 仅用于称谓，不得用于差异化断言。",
+      "additionalProperties": false,
+      "properties": {
+        "ageBand": {
+          "type": ["string", "null"],
+          "enum": ["18-25", "26-35", "36-45", "46-55", "56+", null],
+          "description": "不提供 18 岁以下选项——本应用不面向未成年人。"
+        },
+        "gender": {
+          "type": "string",
+          "enum": ["male", "female", "unspecified"],
+          "default": "unspecified"
+        },
+        "isSelf": {
+          "type": "boolean",
+          "description": "是否为本人照片。false 时 UI 需提示已取得对方同意。"
+        },
+        "focusTopics": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 20 },
+          "maxItems": 3
+        }
+      }
+    },
+
+    "Capture": {
+      "type": "object",
+      "required": ["shots", "quality"],
+      "additionalProperties": false,
+      "properties": {
+        "shots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["front", "profile", "left_palm", "right_palm", "full_body", "half_body"]
+          },
+          "minItems": 1
+        },
+        "quality": { "$ref": "#/$defs/Quality" }
+      }
+    },
+
+    "Quality": {
+      "type": "object",
+      "required": ["score", "resolution", "lighting", "sharpness", "occlusion", "issues"],
+      "additionalProperties": false,
+      "properties": {
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "resolution": { "type": "string", "enum": ["ok", "low"] },
+        "lighting": { "type": "string", "enum": ["ok", "dim", "harsh", "color_cast"] },
+        "sharpness": { "type": "string", "enum": ["ok", "blurry"] },
+        "pose": {
+          "type": "object",
+          "description": "欧拉角，单位度。仅面相/骨相有此字段。",
+          "additionalProperties": false,
+          "properties": {
+            "yaw": { "type": "number" },
+            "pitch": { "type": "number" },
+            "roll": { "type": "number" }
+          }
+        },
+        "occlusion": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "hair_covers_forehead",
+              "hair_covers_ears",
+              "glasses",
+              "mask",
+              "hand_partial",
+              "body_partial",
+              "loose_clothing"
+            ]
+          }
+        },
+        "issues": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 80 },
+          "description": "人类可读的问题短语，供 UI 提示。"
+        }
+      }
+    },
+
+    "FeatureItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "category",
+        "label",
+        "band",
+        "value",
+        "status",
+        "confidence",
+        "evidence",
+        "meaning",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z]+(\\.[a-zA-Z0-9_]+)+$",
+          "description": "稳定的点分路径 ID，全局唯一。"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "三停", "五眼", "眉", "眼", "鼻", "口", "耳", "十二宫", "气色", "五形", "脸型", "对称",
+            "手型", "指形", "掌线", "掌丘", "掌色", "左右手",
+            "头型", "九骨", "骨肉", "骨骼粗细", "体骨", "特殊骨相",
+            "体型", "身体比例", "体态", "肌肤气色", "自评"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "传统术语。AI 应优先使用此词。"
+        },
+        "band": {
+          "type": "string",
+          "enum": ["very_low", "low", "balanced", "high", "very_high", "categorical"],
+          "description": "categorical 用于型态类特征（如「新月眉」），无高低之分。"
+        },
+        "value": {
+          "type": ["string", "number"],
+          "description": "人类可读的测量结果。"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["measured", "inferred", "self_reported"],
+          "description": "unavailable 的项不出现在 features 中，而在 unavailable 数组里。"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.35,
+          "maximum": 1,
+          "description": "低于 0.35 的特征会被降级到 unavailable，因此此处下界为 0.35。"
+        },
+        "evidence": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "必须包含具体数值，供 AI 引用与用户核对。"
+        },
+        "meaning": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "已经过 07-content-policy.md 过滤的释义要点。"
+        },
+        "source": {
+          "type": ["string", "null"],
+          "enum": [
+            "麻衣神相", "柳庄相法", "神相全编", "水镜神相",
+            "冰鉴", "太清神鉴", "人伦大统赋", null
+          ]
+        }
+      }
+    },
+
+    "UnavailableItem": {
+      "type": "object",
+      "description": "测不到的项必须显式声明，AI 才知道边界。policy_excluded 的项不发送给 AI。",
+      "required": ["id", "label", "reason", "detail"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z]+(\\.[a-zA-Z0-9_]+)+$" },
+        "label": { "type": "string", "maxLength": 20 },
+        "reason": {
+          "type": "string",
+          "enum": ["not_observable", "not_captured", "low_confidence", "out_of_scope"],
+          "description": "policy_excluded 仅记录在本地审计日志，不出现在发送给 AI 的 payload 中。"
+        },
+        "detail": { "type": "string", "maxLength": 120 }
+      }
+    },
+
+    "Raw": {
+      "type": "object",
+      "description": "原始度量。发送给 AI 的是裁剪版（≤ 1KB），完整版留在本地 IndexedDB。",
+      "additionalProperties": false,
+      "properties": {
+        "normalizer": {
+          "type": "object",
+          "required": ["type", "valuePx"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "type": "string", "enum": ["IOD", "PW", "SW", "world"] },
+            "valuePx": { "type": "number" }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["number", "string", "object", "null"]
+          }
+        },
+        "complexion": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+
+    "Scorecard": {
+      "type": "object",
+      "description": "本地 scorecard.ts 算出，AI 不参与生成，保证同一照片评分一致。",
+      "required": ["气度格局", "才智思辨", "人际情感", "执行意志", "根基福泽"],
+      "additionalProperties": false,
+      "properties": {
+        "气度格局": { "$ref": "#/$defs/Star" },
+        "才智思辨": { "$ref": "#/$defs/Star" },
+        "人际情感": { "$ref": "#/$defs/Star" },
+        "执行意志": { "$ref": "#/$defs/Star" },
+        "根基福泽": { "$ref": "#/$defs/Star" }
+      }
+    },
+
+    "Star": { "type": "integer", "minimum": 1, "maximum": 5 },
+
+    "Policy": {
+      "type": "object",
+      "required": ["disclaimerRequired", "forbidTopics"],
+      "additionalProperties": false,
+      "properties": {
+        "disclaimerRequired": { "type": "boolean", "const": true },
+        "forbidTopics": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["寿命", "疾病诊断", "具体事件时间", "婚姻成败", "生育", "政治"]
+        }
+      }
+    }
+  }
+}

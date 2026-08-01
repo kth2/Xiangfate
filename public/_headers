@@ -1,0 +1,18 @@
+# Cloudflare Pages / Netlify 的 header 配置
+# Vercel 用根目录的 vercel.json
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/mediapipe/wasm/*
+  Cache-Control: public, max-age=31536000, immutable
+  Cross-Origin-Resource-Policy: same-origin
+
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(self), microphone=(), geolocation=(), interest-cohort=()

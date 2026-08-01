@@ -1,0 +1,170 @@
+/**
+ * 面相全链路：关键点 + 图像 → AnalysisEnvelope。
+ * 这是「确定性的归代码」那一半的终点 —— 出口就是发给 AI 的那份 JSON。
+ */
+
+import { round } from '@/core/band'
+import { analyzeComplexion } from '@/core/color'
+import { assessQuality } from '@/core/quality'
+import { computeScorecard } from '@/core/scorecard'
+import {
+  DEFAULT_FORBID_TOPICS,
+  SCHEMA_VERSION,
+  type AnalysisEnvelope,
+  type OcclusionKind,
+  type Subject,
+} from '@/core/types'
+import { toImageData } from '@/core/image'
+import { eulerFromMatrix, type DetectResult } from '@/mediapipe/detect'
+import { COMPLEXION_REGIONS } from './landmarks'
+import { browDensity, browTailDispersion, computeFaceMetrics } from './metrics'
+import { applyFaceRules } from './rules'
+
+export interface BuildInput {
+  detection: DetectResult
+  bitmap: ImageBitmap
+  subject?: Subject
+}
+
+export function buildMianxiangEnvelope({ detection, bitmap, subject }: BuildInput): AnalysisEnvelope {
+  const { landmarks, blendshapes, transformMatrix, detectorScore } = detection
+  const img = toImageData(bitmap)
+
+  const pose = transformMatrix ? eulerFromMatrix(transformMatrix) : undefined
+
+  // 人脸在画面中的像素宽 —— 质量门控要用
+  const xs = landmarks.map((p) => p.x)
+  const faceWidthPx = (Math.max(...xs) - Math.min(...xs)) * bitmap.width
+
+  // 额头遮挡：网格顶端附近的暗度远高于额中 → 多半是头发压下来了
+  const foreheadOccluded = detectForeheadOcclusion(img, landmarks)
+  const occlusion: OcclusionKind[] = foreheadOccluded ? ['hair_covers_forehead'] : []
+
+  const { quality, qualityFactor, complexionFactor } = assessQuality({
+    img,
+    subjectWidthPx: faceWidthPx,
+    pose,
+    blendshapes,
+    occlusion,
+  })
+
+  const m = computeFaceMetrics(landmarks, bitmap.width, bitmap.height)
+
+  const complexion =
+    complexionFactor > 0
+      ? analyzeComplexion(
+          img,
+          Object.fromEntries(
+            Object.entries(COMPLEXION_REGIONS).map(([k, idxs]) => [
+              k,
+              idxs.map((i) => ({ x: landmarks[i].x, y: landmarks[i].y })),
+            ]),
+          ),
+        )
+      : null
+
+  const browPixels = {
+    left: {
+      density: browDensity(img, landmarks, 'left'),
+      tailDispersion: browTailDispersion(img, landmarks, 'left'),
+    },
+    right: {
+      density: browDensity(img, landmarks, 'right'),
+      tailDispersion: browTailDispersion(img, landmarks, 'right'),
+    },
+  }
+
+  const { features, unavailable, derived } = applyFaceRules({
+    m,
+    qualityFactor,
+    complexionFactor,
+    detectorScore,
+    complexion,
+    browPixels,
+    foreheadOccluded,
+  })
+
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    analysisType: 'mianxiang',
+    analysisId: crypto.randomUUID(),
+    capturedAt: new Date().toISOString(),
+    locale: 'zh-CN',
+    ...(subject ? { subject } : {}),
+    capture: { shots: ['front'], quality },
+    features,
+    derived,
+    raw: {
+      normalizer: { type: 'IOD', valuePx: round(m.iodPx, 1) },
+      metrics: {
+        三停: `${round(m.threeCourts.upper, 3)} / ${round(m.threeCourts.middle, 3)} / ${round(m.threeCourts.lower, 3)}`,
+        五眼: round(m.fiveEye),
+        眼距: round(m.innerGap),
+        眉长比: round((m.brow.left.lenRatio + m.brow.right.lenRatio) / 2),
+        眼纵横比: round((m.eye.left.aspect + m.eye.right.aspect) / 2),
+        外眦上扬角: round((m.eye.left.canthalTilt + m.eye.right.canthalTilt) / 2, 1),
+        鼻长: round(m.nose.len),
+        鼻翼宽: round(m.nose.alarWidth),
+        鼻梁偏移: round(m.nose.bridgeDeviation, 3),
+        口宽鼻翼比: round(m.mouth.widthOverAlar),
+        口角上扬: round(m.mouth.cornerLift, 3),
+        唇厚: round(m.mouth.lipThickness),
+        人中长: round(m.mouth.philtrumLen),
+        面宽高比: round(m.contour.fw),
+        颌颧比: round(m.contour.jc),
+        额颧比: round(m.contour.fc),
+        下颌角: round(m.contour.gonialAngle, 1),
+        对称度: m.symmetryScore,
+        田宅: round(m.tianzhai),
+      },
+      ...(complexion
+        ? {
+            complexion: {
+              相对红度: complexion.aRel,
+              相对黄度: complexion.bRel,
+              明度均匀度: complexion.uniformity,
+              高光占比: complexion.gloss,
+            },
+          }
+        : {}),
+    },
+    unavailable,
+    scorecard: computeScorecard(features),
+    policy: { disclaimerRequired: true, forbidTopics: [...DEFAULT_FORBID_TOPICS] },
+  }
+}
+
+/**
+ * 额头遮挡检测：比较网格顶端带与额中带的亮度。
+ * 头发压额时顶端明显更暗。阈值宽松 —— 误判的代价只是多一句提示。
+ */
+function detectForeheadOcclusion(
+  img: ImageData,
+  landmarks: { x: number; y: number }[],
+): boolean {
+  const top = landmarks[10]
+  const glabella = landmarks[9]
+  if (!top || !glabella) return false
+
+  const bandLum = (yNorm: number) => {
+    const y = Math.round(yNorm * img.height)
+    if (y < 0 || y >= img.height) return null
+    const x0 = Math.round(Math.max(0, (top.x - 0.06) * img.width))
+    const x1 = Math.round(Math.min(img.width - 1, (top.x + 0.06) * img.width))
+    let sum = 0
+    let n = 0
+    for (let x = x0; x <= x1; x++) {
+      const i = (y * img.width + x) * 4
+      sum += 0.299 * img.data[i] + 0.587 * img.data[i + 1] + 0.114 * img.data[i + 2]
+      n++
+    }
+    return n ? sum / n : null
+  }
+
+  // 顶端稍往下一点，避开网格边界本身
+  const topLum = bandLum(top.y + (glabella.y - top.y) * 0.15)
+  const midLum = bandLum(top.y + (glabella.y - top.y) * 0.6)
+  if (topLum === null || midLum === null) return false
+
+  return topLum < midLum * 0.72
+}
