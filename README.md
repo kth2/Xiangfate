@@ -29,14 +29,22 @@
 
 - [x] **第一步：研究与总结** —— 见 [`docs/`](./docs)
 - [x] **第二步：项目初始化** —— 首页四入口 · 端侧检测跑通 · PWA 骨架 · BYO Key 设置
-- [~] **第三步：核心功能开发** —— **面相全链路已打通**；手相/骨相/体相的特征管线待接
-- [ ] 第四步：体验与上线准备
+- [x] **第三步：核心功能开发** —— **四大类特征管线全部打通** + AI 解读 + 追问 + 本地历史
+- [~] 第四步：上线与校准 —— 部署配置已就绪；**阈值校准待真机采样后进行**
 
-**面相已跑通的完整链路**（真实浏览器验证）：
-选类型 → 拍照/上传 → EXIF 剥离 → 按需下载模型 → 478 点检测 → 质量门控 →
-几何度量 → 规则映射 → 结构化 JSON → AI 流式解读 → 输出后置校验 → 报告 + 追问 → 本地历史。
+**完整链路**（真实浏览器验证）：
+选类型 → 拍照/上传 → EXIF 剥离 → 按需下载模型 → 关键点检测 → 质量门控 →
+几何度量 / CV 提取 → 规则映射 → 结构化 JSON → AI 流式解读 → 输出后置校验
+→ 报告 + 追问 → 本地历史。
 
-实测：首屏 JS ≈ 100 KB gzip，端侧检测 ≈ 3.5s（CPU），单张真人脸产出 22 项实测特征 + 3 项未观测。
+| 类型 | 状态 | 说明 |
+|---|---|---|
+| 面相 | ✅ 真人脸验证 | 22 项实测特征 + 3 项未观测，检测 ≈ 3.5s |
+| 体相 | ✅ 已接通 | worldLandmarks 米制比例 + 可选自评问卷 |
+| 骨相 | ✅ 已接通 | 正面 + 侧面推估；枕骨/顶骨/耳后骨显式标为未观测 |
+| 手相 | ✅ 已接通 | 自研掌纹 CV 管线 + 手动校正兜底 |
+
+实测：首屏 JS ≈ 100 KB gzip，应用壳预缓存 633 KiB，107 个测试全绿。
 
 ---
 
@@ -98,6 +106,10 @@ npm install     # postinstall 会把 MediaPipe wasm 复制到 public/mediapipe/w
 npm run dev     # http://localhost:5173
 ```
 
+> ⚠️ **手机上用必须走 HTTPS** —— 浏览器只在安全上下文里给相机权限。
+> 本机开发时 `localhost` 算安全上下文；手机访问局域网 IP 则不算，
+> 要么部署到线上（见下），要么用 `npm run dev -- --host` 配合隧道工具。
+
 首次打开会有一个免责声明确认页。AI Key 在应用内的「设置」页填写，不需要 `.env`。
 
 ```bash
@@ -125,10 +137,53 @@ DevTools 都能拿到。公开部署请用 `proxy` 模式。
 
 ---
 
+## 部署
+
+三家都配好了，选一个即可。部署后拿到的 HTTPS 地址在手机浏览器打开，
+再「添加到主屏幕」，就是一个可安装的 PWA。
+
+### Vercel（推荐）
+
+```bash
+npm i -g vercel
+vercel            # 首次会问几个问题，一路默认即可
+vercel --prod
+```
+配置在 `vercel.json`：SPA 回退、静态资源长缓存、`Permissions-Policy: camera=(self)`。
+
+### Cloudflare Pages
+
+在控制台新建项目并连上仓库，然后填：
+- **Build command**：`npm run build`
+- **Build output directory**：`dist`
+- **Node 版本**：22
+
+SPA 回退与 header 走 `public/_redirects` 与 `public/_headers`（构建时会被复制进 `dist/`）。
+
+### Netlify
+
+连上仓库即可，`netlify.toml` 已经配好。
+
+### 部署体积说明
+
+`public/mediapipe/` 里的 wasm 运行时约 **22 MB**，由 `postinstall` 从 `node_modules`
+复制而来（不入库）。只复制真正会被加载的两个变体 —— `FilesetResolver` 的路径拼装
+逻辑决定了 `_module_` 那一套永远不会被请求，排除它省下约 12 MB。
+
+三个 `.task` 模型（共约 17 MB）不打进包，首次用到某个类型时才从 Google 的
+CDN 下载，之后由 Service Worker 缓存 90 天。
+
+---
+
 ## 技术栈
 
-React 19 · TypeScript · Vite · Tailwind CSS 4 · Zustand ·
-`@mediapipe/tasks-vision@1.0.1` · Gemini 2.5 Flash / OpenRouter · vite-plugin-pwa
+React 19 · TypeScript · Vite · Tailwind CSS 4 · Zustand · React Router 7 ·
+`@mediapipe/tasks-vision@1.0.1` · Gemini 2.5 Flash / OpenRouter · vite-plugin-pwa · idb
+
+掌纹提取是自研的 CV 管线（CLAHE → Gabor 滤波器组 → 自适应阈值 → 形态学 →
+Zhang-Suen 细化 → 骨架追踪），跑在 Web Worker 里。
+不引 OpenCV.js：完整包约 8–9 MB，而我们只需要其中 5 个算子，手写约 400 行、
+打包后 < 15 KB。
 
 ---
 

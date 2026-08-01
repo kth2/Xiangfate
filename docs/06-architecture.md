@@ -347,13 +347,15 @@ ALLOWED_ORIGINS=https://xiangfate.vercel.app
 6. ✅ 首启免责门、设置页（BYO Key）、关于页、深浅主题
 7. ✅ PWA manifest + SW + 图标
 
-### 第三步（下一步）
-8. `scripts/verify-landmarks.ts` 校准 478 点索引表 → 落 `mianxiang/landmarks.ts`
-9. **先做面相全链路**（度量 → 规则 → JSON → Prompt → 报告），作为其他三类的模板
-10. 体相（Pose 相对简单）→ 骨相（复用面相与体相的 metrics）
-11. 手相放最后（掌纹管线最重，且需要 `cv/*` 全套算子 + 校正 UI）
-12. `core/guard.ts` 输出后置校验、历史记录（IndexedDB）
+### 第三步（已完成）
+8. ✅ 478 点索引表已用规范网格几何证明（订正初稿 4 处错误）
+9. ✅ 面相全链路（度量 → 规则 → JSON → Prompt → 报告），作为其他三类的模板
+10. ✅ 体相（worldLandmarks 米制比例 + 可选自评）
+11. ✅ 骨相（复用面相与体相的 metrics；不可观测的骨显式标记）
+12. ✅ 手相（`cv/*` 全套自研算子 + Worker + 掌纹校正 UI）
+13. ✅ `core/guard.ts` 输出后置校验、历史记录（IndexedDB）
 
-### 第四步
-13. 移动端适配打磨、权限处理、离线队列
-14. README 补全 + 部署
+### 第四步（进行中）
+14. ✅ 部署配置：Vercel / Cloudflare Pages / Netlify 三家都已配好
+15. ⏳ **阈值校准** —— 需要真机采样。所有标 `CALIBRATE` 的阈值都等这一步
+16. ⏳ 移动端适配打磨、权限处理、离线队列

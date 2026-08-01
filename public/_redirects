@@ -1,0 +1,3 @@
+# Cloudflare Pages / Netlify 的 SPA 回退。Vercel 用 vercel.json 的 rewrites。
+# 200 表示重写而非跳转，浏览器地址栏保持原路径。
+/*  /index.html  200

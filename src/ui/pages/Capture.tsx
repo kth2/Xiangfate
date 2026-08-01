@@ -5,27 +5,49 @@ import { captureVideoFrame, loadImageFile } from '@/core/image'
 import { formatMb, totalBytes } from '@/mediapipe/loader'
 import { detect, eulerFromMatrix, NoSubjectError, type DetectResult } from '@/mediapipe/detect'
 import { buildMianxiangEnvelope } from '@/modules/mianxiang/pipeline'
+import { buildTixiangEnvelope } from '@/modules/tixiang/pipeline'
+import { buildGuxiangEnvelope } from '@/modules/guxiang/pipeline'
+import {
+  analyzePalm,
+  buildShouxiangEnvelope,
+  needsCorrection,
+  type HandShot,
+  type PalmAnalysis,
+} from '@/modules/shouxiang/pipeline'
+import type { SurveyAnswers } from '@/modules/tixiang/survey'
+import type { P2 } from '@/core/geom'
+import type { AnalysisEnvelope, PalmLineName, ShotKind } from '@/core/types'
 import { useAnalysis } from '@/store/analysis.store'
 import { CAPTURE_PRIVACY } from '@/copy/disclaimer.zh-CN'
-import {
-  HAND_CONNECTIONS,
-  LandmarkOverlay,
-  POSE_CONNECTIONS,
-} from '../components/LandmarkOverlay'
+import { HAND_CONNECTIONS, LandmarkOverlay, POSE_CONNECTIONS } from '../components/LandmarkOverlay'
+import { PalmLineCorrector } from '../components/PalmLineCorrector'
+import { BodySurvey } from '../components/BodySurvey'
 
-type Stage = 'intro' | 'pick' | 'loading' | 'detecting' | 'result' | 'building'
+type Stage =
+  | 'intro'
+  | 'pick'
+  | 'loading'
+  | 'result'
+  | 'building'
+  | 'survey'
+  | 'correct'
+
+/** 每个机位的采集结果，收尾时统一交给对应的 pipeline */
+interface Captured {
+  kind: ShotKind
+  detection: DetectResult
+  bitmap: ImageBitmap
+  previewUrl: string
+}
 
 export function Capture() {
   const { type } = useParams()
   const navigate = useNavigate()
   const spec = isAnalysisType(type ?? '') ? getTypeSpec(type!) : undefined
 
-  const shots = useAnalysis((s) => s.shots)
-  const addShot = useAnalysis((s) => s.addShot)
   const start = useAnalysis((s) => s.start)
   const setEnvelope = useAnalysis((s) => s.setEnvelope)
   const subject = useAnalysis((s) => s.subject)
-  const releaseBitmaps = useAnalysis((s) => s.releaseBitmaps)
 
   const [stage, setStage] = useState<Stage>(spec?.caveat ? 'intro' : 'pick')
   const [shotIndex, setShotIndex] = useState(0)
@@ -34,17 +56,19 @@ export function Capture() {
   const [preview, setPreview] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [cameraOn, setCameraOn] = useState(false)
+  const [palm, setPalm] = useState<PalmAnalysis | null>(null)
+  const [palmMissing, setPalmMissing] = useState<PalmLineName[]>([])
 
+  const capturedRef = useRef<Captured[]>([])
+  const palmAnalysesRef = useRef<PalmAnalysis[]>([])
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const currentShot: ShotSpec | undefined = spec?.shots[shotIndex]
 
-  // 直接输入 URL 进来时，store 里还没有 type
   useEffect(() => {
     if (spec) start(spec.type)
-    // start 会 reset，只在类型变化时跑
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spec?.type])
 
@@ -54,7 +78,27 @@ export function Capture() {
     setCameraOn(false)
   }, [])
 
-  useEffect(() => stopCamera, [stopCamera])
+  // 离开页面时释放所有位图 —— 它们绝不进入任何持久化
+  useEffect(
+    () => () => {
+      stopCamera()
+      for (const c of capturedRef.current) {
+        try {
+          c.bitmap.close()
+        } catch {
+          /* 已释放 */
+        }
+        URL.revokeObjectURL(c.previewUrl)
+      }
+      capturedRef.current = []
+    },
+    [stopCamera],
+  )
+
+  const pose = useMemo(
+    () => (result?.transformMatrix ? eulerFromMatrix(result.transformMatrix) : null),
+    [result],
+  )
 
   if (!spec) {
     return (
@@ -77,7 +121,6 @@ export function Capture() {
       })
       streamRef.current = stream
       setCameraOn(true)
-      // 等 video 元素挂载
       queueMicrotask(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream
@@ -89,7 +132,7 @@ export function Capture() {
     }
   }
 
-  async function runDetection(bitmap: ImageBitmap, previewUrl: string, width: number, height: number) {
+  async function runDetection(bitmap: ImageBitmap, previewUrl: string) {
     const shot = currentShot!
     setPreview(previewUrl)
     setStage('loading')
@@ -100,9 +143,17 @@ export function Capture() {
       const res = await detect(shot.detector, bitmap, (p) =>
         setProgress({ ratio: p.ratio, phase: p.phase }),
       )
-      setStage('detecting')
+      // 同一机位重拍时先释放旧的
+      const prev = capturedRef.current.find((c) => c.kind === shot.kind)
+      if (prev) {
+        prev.bitmap.close()
+        URL.revokeObjectURL(prev.previewUrl)
+      }
+      capturedRef.current = [
+        ...capturedRef.current.filter((c) => c.kind !== shot.kind),
+        { kind: shot.kind, detection: res, bitmap, previewUrl },
+      ]
       setResult(res)
-      addShot({ kind: shot.kind, bitmap, previewUrl, width, height })
       setStage('result')
     } catch (e) {
       bitmap.close()
@@ -110,11 +161,7 @@ export function Capture() {
       setPreview(null)
       setStage('pick')
       setError(
-        e instanceof NoSubjectError
-          ? e.message
-          : e instanceof Error
-            ? e.message
-            : '出了点问题，再试一次',
+        e instanceof NoSubjectError ? e.message : e instanceof Error ? e.message : '出了点问题，再试一次',
       )
     } finally {
       setProgress(null)
@@ -127,7 +174,7 @@ export function Capture() {
     if (!file) return
     try {
       const img = await loadImageFile(file)
-      await runDetection(img.bitmap, img.previewUrl, img.width, img.height)
+      await runDetection(img.bitmap, img.previewUrl)
     } catch (err) {
       setError(err instanceof Error ? err.message : '图片读不出来')
     }
@@ -138,7 +185,7 @@ export function Capture() {
     try {
       const img = await captureVideoFrame(videoRef.current)
       stopCamera()
-      await runDetection(img.bitmap, img.previewUrl, img.width, img.height)
+      await runDetection(img.bitmap, img.previewUrl)
     } catch (err) {
       setError(err instanceof Error ? err.message : '拍摄失败')
     }
@@ -153,38 +200,114 @@ export function Capture() {
       setStage('pick')
       return
     }
-    finish()
+    void finish()
   }
 
-  function skipOptional() {
-    finish()
-  }
+  /* ---------------- 收尾：分派到对应的 pipeline ---------------- */
 
-  /**
-   * 收尾：把关键点 + 图像跑成 AnalysisEnvelope。
-   * 目前只有面相接了完整管线；其余三类到第三步后续再接。
-   */
-  function finish() {
-    const shot = useAnalysis.getState().shots[0]
-    if (spec!.type !== 'mianxiang' || !shot || !result) {
-      void navigate('/report')
-      return
-    }
+  async function finish(survey?: SurveyAnswers | null) {
+    const caps = capturedRef.current
     setStage('building')
+    setError(null)
+
     try {
-      const env = buildMianxiangEnvelope({
-        detection: result,
-        bitmap: shot.bitmap,
-        subject,
-      })
+      let env: AnalysisEnvelope
+
+      switch (spec!.type) {
+        case 'mianxiang': {
+          const front = caps.find((c) => c.kind === 'front')
+          if (!front) throw new Error('缺少正面照')
+          env = buildMianxiangEnvelope({ detection: front.detection, bitmap: front.bitmap, subject })
+          break
+        }
+
+        case 'tixiang': {
+          const body = caps[0]
+          if (!body) throw new Error('缺少体照')
+          // 先问自评，再出报告
+          if (survey === undefined) {
+            setStage('survey')
+            return
+          }
+          env = buildTixiangEnvelope({
+            detection: body.detection,
+            bitmap: body.bitmap,
+            subject,
+            survey,
+            shotKind: body.kind,
+          })
+          break
+        }
+
+        case 'guxiang': {
+          const front = caps.find((c) => c.kind === 'front')
+          const profile = caps.find((c) => c.kind === 'profile')
+          const bodyShot = caps.find((c) => c.kind === 'half_body')
+          if (!front) throw new Error('缺少正面照')
+          env = buildGuxiangEnvelope({
+            front: { detection: front.detection, bitmap: front.bitmap },
+            profile: profile ? { detection: profile.detection, bitmap: profile.bitmap } : null,
+            body: bodyShot ? { detection: bodyShot.detection, bitmap: bodyShot.bitmap } : null,
+            subject,
+          })
+          break
+        }
+
+        case 'shouxiang': {
+          const handShots: HandShot[] = caps.map((c) => ({
+            detection: c.detection,
+            bitmap: c.bitmap,
+            side: c.kind === 'left_palm' ? 'left' : 'right',
+          }))
+          if (!handShots.length) throw new Error('缺少手掌照')
+
+          // 掌纹提取跑 Worker，可能要几百毫秒
+          if (!palmAnalysesRef.current.length) {
+            setProgress({ ratio: null, phase: 'palm' })
+            palmAnalysesRef.current = await Promise.all(handShots.map(analyzePalm))
+            setProgress(null)
+          }
+
+          // 主线没测全就请用户校正 —— 宁可让用户参与，也不凭空生成掌纹判断
+          const primary = palmAnalysesRef.current[0]
+          const missing = needsCorrection(primary)
+          if (missing.length && !palm) {
+            setPalm(primary)
+            setPalmMissing(missing)
+            setStage('correct')
+            return
+          }
+
+          env = buildShouxiangEnvelope(
+            { shots: handShots, subject, dominantHand: handShots[0].side, corrections: correctionsRef.current },
+            palmAnalysesRef.current,
+          )
+          break
+        }
+      }
+
       setEnvelope(env)
-      // 位图使命已尽，立刻释放 —— 它绝不进入任何持久化
-      releaseBitmaps()
+      releaseAll()
       void navigate('/report')
     } catch (e) {
       setStage('result')
+      setProgress(null)
       setError(e instanceof Error ? e.message : '特征计算失败，换一张照片试试')
     }
+  }
+
+  const correctionsRef = useRef<Partial<Record<PalmLineName, P2[]>>>({})
+
+  function releaseAll() {
+    for (const c of capturedRef.current) {
+      try {
+        c.bitmap.close()
+      } catch {
+        /* 已释放 */
+      }
+      URL.revokeObjectURL(c.previewUrl)
+    }
+    capturedRef.current = []
   }
 
   function retake() {
@@ -193,11 +316,6 @@ export function Capture() {
     setStage('pick')
   }
 
-  const pose = useMemo(
-    () => (result?.transformMatrix ? eulerFromMatrix(result.transformMatrix) : null),
-    [result],
-  )
-
   const connections =
     currentShot?.detector === 'hand'
       ? HAND_CONNECTIONS
@@ -205,7 +323,7 @@ export function Capture() {
         ? POSE_CONNECTIONS
         : undefined
 
-  /* ---------------- 说明页（仅骨相/手相这类有局限的类型） ---------------- */
+  /* ---------------- 说明页 ---------------- */
   if (stage === 'intro' && spec.caveat) {
     return (
       <div className="page flex flex-col px-6 pt-8 pb-10">
@@ -215,15 +333,13 @@ export function Capture() {
         <p className="mb-6 text-sm leading-loose text-muted">{spec.caveat}</p>
 
         <div className="card p-4">
-          <p className="mb-3 text-[13px]">需要 {spec.shots.filter((s) => s.required).length} 张照片</p>
+          <p className="mb-3 text-[13px]">
+            需要 {spec.shots.filter((s) => s.required).length} 张照片
+          </p>
           <ul className="flex flex-col gap-2">
             {spec.shots.map((s) => (
               <li key={s.kind} className="flex items-center gap-2 text-[13px] text-muted">
-                <span
-                  aria-hidden
-                  className="h-1 w-1 rounded-full"
-                  style={{ background: spec.accent }}
-                />
+                <span aria-hidden className="h-1 w-1 rounded-full" style={{ background: spec.accent }} />
                 {s.title}
                 {!s.required && <span className="text-subtle">（可选）</span>}
               </li>
@@ -242,9 +358,41 @@ export function Capture() {
     )
   }
 
+  /* ---------------- 体相自评 ---------------- */
+  if (stage === 'survey') {
+    return (
+      <div className="page px-6 pt-8 pb-10">
+        <Header name={spec.name} onBack={() => setStage('result')} backLabel="返回" />
+        <div className="rule-gold my-6" />
+        <BodySurvey accent={spec.accent} onDone={(a) => void finish(a)} />
+      </div>
+    )
+  }
+
+  /* ---------------- 掌纹校正 ---------------- */
+  if (stage === 'correct' && palm) {
+    return (
+      <div className="page px-6 pt-8 pb-10">
+        <Header name={spec.name} onBack={() => setStage('result')} backLabel="返回" />
+        <div className="rule-gold my-6" />
+        <PalmLineCorrector
+          analysis={palm}
+          missing={palmMissing}
+          accent={spec.accent}
+          onDone={(c) => {
+            correctionsRef.current = c
+            setPalm(null)
+            void finish()
+          }}
+        />
+      </div>
+    )
+  }
+
   /* ---------------- 结果页 ---------------- */
   if (stage === 'result' && result && preview) {
     const points = result.landmarks.map((p) => ({ x: p.x, y: p.y }))
+    const isLast = shotIndex + 1 >= spec.shots.length
     return (
       <div className="page flex flex-col px-6 pt-8 pb-10">
         <Header name={spec.name} onBack={retake} backLabel="重拍" />
@@ -257,37 +405,23 @@ export function Capture() {
 
         <div className="card mb-5 p-4">
           <p className="mb-3 flex items-center gap-2 text-[13px]">
-            <span aria-hidden className="text-[var(--color-gold-400)]">✓</span>
+            <span aria-hidden style={{ color: spec.accent }}>
+              ✓
+            </span>
             识别到 {result.landmarks.length} 个关键点
           </p>
           <dl className="flex flex-col gap-1.5 text-[12px] text-subtle">
             {pose && (
-              <div className="flex justify-between">
-                <dt>头部姿态</dt>
-                <dd>
-                  偏转 {pose.yaw}° · 俯仰 {pose.pitch}° · 侧倾 {pose.roll}°
-                </dd>
-              </div>
+              <Row k="头部姿态" v={`偏转 ${pose.yaw}° · 俯仰 ${pose.pitch}° · 侧倾 ${pose.roll}°`} />
             )}
             {result.handedness && (
-              <div className="flex justify-between">
-                <dt>手别</dt>
-                <dd>
-                  {result.handedness.label === 'Left' ? '左手' : '右手'}（
-                  {Math.round(result.handedness.score * 100)}%）
-                </dd>
-              </div>
+              <Row
+                k="手别"
+                v={`${result.handedness.label === 'Left' ? '左手' : '右手'}（${Math.round(result.handedness.score * 100)}%）`}
+              />
             )}
-            {result.worldLandmarks && (
-              <div className="flex justify-between">
-                <dt>世界坐标</dt>
-                <dd>已获取（米制，比例与拍摄距离无关）</dd>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <dt>检测置信度</dt>
-              <dd>{Math.round(result.detectorScore * 100)}%</dd>
-            </div>
+            {result.worldLandmarks && <Row k="世界坐标" v="已获取（米制，与拍摄距离无关）" />}
+            <Row k="检测置信度" v={`${Math.round(result.detectorScore * 100)}%`} />
           </dl>
         </div>
 
@@ -300,36 +434,42 @@ export function Capture() {
           </p>
         )}
 
-        {spec.type !== 'mianxiang' && (
-          <p className="mb-6 text-[12px] leading-relaxed text-subtle">
-            {spec.name}的特征计算尚在接入中。当前版本已跑通「拍照 → 端侧检测 → 关键点可视化」。
-          </p>
-        )}
-
         <div className="mt-auto flex gap-3">
           <button type="button" onClick={retake} className="btn-outline h-12 flex-1 text-[15px]">
             重拍
           </button>
           <button type="button" onClick={nextShot} className="btn-seal h-12 flex-[2] text-[15px]">
-            {shotIndex + 1 < spec.shots.length ? '下一张' : '下一步'}
+            {isLast ? '出报告' : '下一张'}
           </button>
         </div>
+
+        {!isLast && !spec.shots[shotIndex + 1].required && (
+          <button
+            type="button"
+            onClick={() => void finish()}
+            className="mt-3 py-2 text-center text-[13px] text-subtle"
+          >
+            跳过剩下的，直接出报告
+          </button>
+        )}
       </div>
     )
   }
 
-  /* ---------------- 加载 / 检测中 ---------------- */
-  if (stage === 'loading' || stage === 'detecting' || stage === 'building') {
+  /* ---------------- 加载 / 计算中 ---------------- */
+  if (stage === 'loading' || stage === 'building') {
     const phaseLabel =
-      stage === 'building'
-        ? '正在计算特征'
-        : progress?.phase === 'wasm'
-        ? '正在准备检测引擎'
-        : progress?.phase === 'model'
-          ? '正在下载模型'
-          : progress?.phase === 'init'
-            ? '正在初始化'
-            : '正在识别关键点'
+      progress?.phase === 'palm'
+        ? '正在提取掌纹'
+        : stage === 'building'
+          ? '正在计算特征'
+          : progress?.phase === 'wasm'
+            ? '正在准备检测引擎'
+            : progress?.phase === 'model'
+              ? '正在下载模型'
+              : progress?.phase === 'init'
+                ? '正在初始化'
+                : '正在识别关键点'
     const pct = progress?.ratio != null ? Math.round(progress.ratio * 100) : null
 
     return (
@@ -337,17 +477,16 @@ export function Capture() {
         <div className="h-px w-full max-w-xs overflow-hidden bg-[var(--line)]">
           <div
             className="h-full transition-[width] duration-200"
-            style={{
-              width: pct != null ? `${pct}%` : '35%',
-              background: 'var(--color-gold-400)',
-            }}
+            style={{ width: pct != null ? `${pct}%` : '35%', background: spec.accent }}
           />
         </div>
         <p className="font-title text-sm tracking-[0.25em]">{phaseLabel}</p>
         <p className="text-center text-[12px] leading-relaxed text-subtle">
           {progress?.phase === 'model'
             ? `模型约 ${formatMb(totalBytes([currentShot!.detector]))}，只需下载一次`
-            : '全部在你的设备上完成'}
+            : progress?.phase === 'palm'
+              ? '掌纹提取在后台线程进行，稍等几秒'
+              : '全部在你的设备上完成'}
         </p>
       </div>
     )
@@ -403,11 +542,11 @@ export function Capture() {
 
       <div className="mt-auto flex flex-col gap-3">
         {cameraOn ? (
-          <button type="button" onClick={onShutter} className="btn-seal h-12 w-full text-[15px]">
+          <button type="button" onClick={() => void onShutter()} className="btn-seal h-12 w-full text-[15px]">
             拍摄
           </button>
         ) : (
-          <button type="button" onClick={openCamera} className="btn-seal h-12 w-full text-[15px]">
+          <button type="button" onClick={() => void openCamera()} className="btn-seal h-12 w-full text-[15px]">
             打开相机
           </button>
         )}
@@ -423,8 +562,8 @@ export function Capture() {
         {!currentShot!.required && (
           <button
             type="button"
-            onClick={skipOptional}
-            className="py-2 text-[13px] text-subtle underline-offset-4"
+            onClick={() => void finish()}
+            className="py-2 text-[13px] text-subtle"
           >
             跳过这张
           </button>
@@ -439,9 +578,20 @@ export function Capture() {
         />
       </div>
 
-      {shots.length > 0 && (
-        <p className="mt-4 text-center text-[12px] text-subtle">已采集 {shots.length} 张</p>
+      {capturedRef.current.length > 0 && (
+        <p className="mt-4 text-center text-[12px] text-subtle">
+          已采集 {capturedRef.current.length} 张
+        </p>
       )}
+    </div>
+  )
+}
+
+function Row({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex justify-between gap-3">
+      <dt>{k}</dt>
+      <dd className="text-right">{v}</dd>
     </div>
   )
 }

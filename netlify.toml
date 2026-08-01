@@ -1,0 +1,9 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# SPA 回退与 header 走 public/_redirects 与 public/_headers，
+# 它们会被原样复制进 dist/
