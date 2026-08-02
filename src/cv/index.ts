@@ -167,18 +167,22 @@ export function gaborMaxResponse(src: Gray, p: GaborParams = DEFAULT_GABOR): Gra
         sum += v
       }
     }
-    // 零均值化，避免直流分量
+    // 零均值化避免直流分量；再整体取负，让「暗谷线」成为正响应。
+    //
+    // 取负必须发生在这里，不能等 convolveMax 跨方向取完最大值之后再做：
+    // 我们要的是各方向谷线响应的最大值 max(−r)，而 −max(r) 等于 min(−r)，
+    // 拿到的是最弱的那个方向。之前就是在循环外取负，谷线中心的响应
+    // 因此和背景几乎一样高（实测 214 vs 215），整条 Gabor 增强形同虚设。
     const mean = sum / (size * size)
-    for (let i = 0; i < kernel.length; i++) kernel[i] -= mean
+    for (let i = 0; i < kernel.length; i++) kernel[i] = -(kernel[i] - mean)
 
     convolveMax(src, kernel, size, radius, out)
   }
 
-  // 谷线是暗的 → 取负；再整体归一
+  // 归一到 0–255，谷线为亮 —— adaptiveThreshold 按「大于阈值」取线
   let min = Infinity
   let max = -Infinity
   for (let i = 0; i < out.length; i++) {
-    out[i] = -out[i]
     if (out[i] < min) min = out[i]
     if (out[i] > max) max = out[i]
   }
