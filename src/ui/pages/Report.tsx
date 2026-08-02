@@ -67,7 +67,7 @@ export function Report() {
 
     let session: AnalysisSession
     try {
-      session = new AnalysisSession(createProvider(providerId, cfg.apiKey, cfg.model), envelope)
+      session = new AnalysisSession(createProvider(providerId, cfg.apiKey, cfg.model, cfg.baseUrl), envelope)
     } catch (e) {
       setError(e instanceof Error ? e.message : '还没配置 API Key')
       setStage('error')
@@ -109,7 +109,7 @@ export function Report() {
       setError(friendlyError(e))
       setStage('error')
     }
-  }, [envelope, providerId, cfg.apiKey, cfg.model])
+  }, [envelope, providerId, cfg.apiKey, cfg.model, cfg.baseUrl])
 
   useEffect(() => {
     if (!id && envelope && stage === 'idle') void generate()
@@ -127,7 +127,7 @@ export function Report() {
     if (!sessionRef.current && envelope) {
       try {
         sessionRef.current = new AnalysisSession(
-          createProvider(providerId, cfg.apiKey, cfg.model),
+          createProvider(providerId, cfg.apiKey, cfg.model, cfg.baseUrl),
           envelope,
         )
       } catch (err) {

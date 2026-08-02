@@ -122,6 +122,20 @@ npm run preview
 > `public/mediapipe/` 由 `scripts/copy-mediapipe-wasm.mjs` 生成（约 22 MB），已 gitignore。
 > 之所以不走 CDN：走自己的域名才能真正离线可用。
 
+### 关于模型选择
+
+模型列表**从服务商 API 实时拉取**，不是写死在代码里的 ——
+服务商上了新模型，刷新一下就能选到。
+
+- **Gemini**：调 `models.list`，需要先填 Key；自动滤掉 embedding / imagen / TTS 这类非对话模型
+- **OpenRouter**：`GET /models` 是公开端点，不填 Key 也能浏览；免费模型排在最前并打「免费」标
+- 列表本地缓存 24 小时，随时可以点「刷新列表」取最新
+- 拉不到时回落到缓存或内置兜底清单，界面上会标明来源
+- 任何时候都能**手动填模型 ID**，不被我们的列表限制
+- 选中的模型如果不在服务商的实时列表里（下线或改名），会明确警告
+
+「高级设置」里可以覆盖**接口地址**，走自建代理或镜像时用得上，留空即默认。
+
 ### 关于 API Key
 
 两种模式，通过 `VITE_AI_MODE` 切换：
@@ -196,7 +210,7 @@ CDN 下载，之后由 Service Worker 缓存 90 天。
 ## 技术栈
 
 React 19 · TypeScript · Vite · Tailwind CSS 4 · Zustand · React Router 7 ·
-`@mediapipe/tasks-vision@1.0.1` · Gemini 2.5 Flash / OpenRouter · vite-plugin-pwa · idb
+`@mediapipe/tasks-vision@1.0.1` · Google Gemini / OpenRouter · vite-plugin-pwa · idb
 
 掌纹提取是自研的 CV 管线（CLAHE → Gabor 滤波器组 → 自适应阈值 → 形态学 →
 Zhang-Suen 细化 → 骨架追踪），跑在 Web Worker 里。

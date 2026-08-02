@@ -7,6 +7,8 @@ import {
   type ThemeMode,
 } from '@/store/settings.store'
 import { releaseAll } from '@/mediapipe/loader'
+import { clearModelCache, DEFAULT_BASE_URL } from '@/ai/models'
+import { ModelPicker } from '../components/ModelPicker'
 
 export function Settings() {
   const {
@@ -15,11 +17,13 @@ export function Settings() {
     configs,
     setApiKey,
     setModel,
+    setBaseUrl,
     theme,
     setTheme,
   } = useSettings()
   const [revealed, setRevealed] = useState(false)
   const [cleared, setCleared] = useState(false)
+  const [advanced, setAdvanced] = useState(false)
 
   const preset = PROVIDER_PRESETS[provider]
   const config = configs[provider]
@@ -34,6 +38,7 @@ export function Settings() {
     if ('indexedDB' in window) {
       indexedDB.deleteDatabase('xiangfate')
     }
+    clearModelCache()
     setCleared(true)
   }
 
@@ -106,19 +111,41 @@ export function Settings() {
           去 {preset.name} 申请 Key →
         </a>
 
-        <label className="mb-2 block text-[13px]">模型</label>
-        <select
+        <ModelPicker
+          provider={provider}
+          apiKey={config.apiKey}
+          baseUrl={config.baseUrl}
           value={config.model}
-          onChange={(e) => setModel(provider, e.target.value)}
-          className="w-full border bg-transparent px-3 py-2.5 text-[13px] outline-none"
-          style={{ borderColor: 'var(--line)', borderRadius: 2 }}
+          onChange={(id) => setModel(provider, id)}
+          needsKeyToList={preset.needsKeyToList}
+        />
+
+        <button
+          type="button"
+          onClick={() => setAdvanced((v) => !v)}
+          className="mt-4 text-[12px] text-subtle"
         >
-          {preset.models.map((m) => (
-            <option key={m} value={m} className="bg-[var(--bg-raised)]">
-              {m}
-            </option>
-          ))}
-        </select>
+          {advanced ? '收起高级设置' : '高级设置（自定义接口地址）'}
+        </button>
+
+        {advanced && (
+          <div className="mt-3">
+            <label className="mb-2 block text-[13px]">接口地址</label>
+            <input
+              value={config.baseUrl}
+              onChange={(e) => setBaseUrl(provider, e.target.value)}
+              placeholder={DEFAULT_BASE_URL[provider]}
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full border bg-transparent px-3 py-2.5 font-mono text-[12px] outline-none"
+              style={{ borderColor: 'var(--line)', borderRadius: 2 }}
+            />
+            <p className="mt-2 text-[11px] leading-relaxed text-subtle">
+              留空用默认地址。只有在走自建代理或镜像时才需要改；
+              填错会导致模型列表和解读都失败。
+            </p>
+          </div>
+        )}
 
         <div
           className="mt-4 border-l-2 py-2 pl-3"
