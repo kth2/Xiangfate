@@ -129,7 +129,7 @@ export class AnalysisSession {
     }
 
     this.turn++
-    const msgs = this.buildFollowUpContext(question)
+    const msgs = this.buildFollowUpContext(question, verdict.kind === 'major_decision')
 
     let raw = ''
     for await (const d of this.provider.stream(msgs, {
@@ -148,8 +148,11 @@ export class AnalysisSession {
     yield { done: { text: filtered.text, hits: filtered.hits, regenerated: false } }
   }
 
-  private buildFollowUpContext(question: string): ChatMessage[] {
-    const followUp = buildFollowUpPrompt(question, this.turn)
+  private buildFollowUpContext(question: string, majorDecision: boolean): ChatMessage[] {
+    const followUp = buildFollowUpPrompt(question, this.turn, {
+      type: this.envelope.analysisType,
+      majorDecision,
+    })
 
     if (this.turn <= SUMMARIZE_AFTER_TURN) {
       return [...this.history, { role: 'user', content: followUp }]
