@@ -173,6 +173,14 @@ vercel --prod
 `vercel.json` 里已经配好 SPA 回退、静态资源长缓存，以及
 `Permissions-Policy: camera=(self)`（手机上要相机权限，这条是必需的）。
 
+**SPA 回退**用的是 `/(.*) → /index.html`。Vercel 会先匹配静态文件、
+匹配不到才走 rewrite，所以这条 catch-all 不会拦截 `/assets/*` 与 `/mediapipe/*`。
+
+> ⚠️ `vercel.json` 是严格 JSON，**不能写注释，也不能加任何自造的键**
+> （比如 `_comment`）—— Vercel 的 schema 会拒绝未知属性，直接部署失败。
+> 说明文字一律写在这份 README 里。
+> `src/core/__tests__/deploy-config.test.ts` 会检查这一点。
+
 ### Netlify
 
 导入仓库即可，`netlify.toml` 已配好 SPA 回退与缓存头。
