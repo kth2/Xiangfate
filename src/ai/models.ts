@@ -38,6 +38,34 @@ export const DEFAULT_BASE_URL: Record<ProviderId, string> = {
   openrouter: 'https://openrouter.ai/api/v1',
 }
 
+/**
+ * 把用户填的端点归一成一个可用的绝对地址。
+ *
+ * 设置里 baseUrl 的默认值是空串（「留空用默认」），而函数默认参数只对
+ * undefined 生效，不对 ''。之前 provider 直接写 `baseUrl = DEFAULT_BASE_URL.x`，
+ * 空串就这么穿了过去，请求地址退化成 `/models/xxx:streamGenerateContent`
+ * —— 相对路径，打到自己站点上。Vercel 把它 rewrite 到 index.html，
+ * 对静态文件 POST 返回 405，于是所有人的分析都失败。
+ *
+ * 顺带挡住「填了但不是绝对 http(s) 地址」的情况：与其静悄悄地把 API Key
+ * POST 到本站，不如当场报错说清楚。
+ */
+export function normalizeBaseUrl(provider: ProviderId, baseUrl?: string | null): string {
+  const raw = baseUrl?.trim()
+  if (!raw) return DEFAULT_BASE_URL[provider]
+
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error(`接口地址「${raw}」不是合法的 URL，去设置页改一下，或者留空用默认`)
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error(`接口地址必须以 http:// 或 https:// 开头，现在是「${raw}」`)
+  }
+  return raw.replace(/\/+$/, '')
+}
+
 /* ============================================================
    兜底清单 —— 只在拉取失败时用，UI 会标明可能已过期
    ============================================================ */
@@ -151,7 +179,7 @@ export async function listModels(
  */
 async function fetchGeminiModels(opts: FetchOptions): Promise<ModelInfo[]> {
   if (!opts.apiKey?.trim()) throw new Error('need key')
-  const base = (opts.baseUrl || DEFAULT_BASE_URL.gemini).replace(/\/+$/, '')
+  const base = normalizeBaseUrl('gemini', opts.baseUrl)
 
   const out: ModelInfo[] = []
   let pageToken: string | undefined
@@ -207,7 +235,7 @@ async function fetchGeminiModels(opts: FetchOptions): Promise<ModelInfo[]> {
 
 /** OpenRouter GET /models —— 公开端点，不需要 Key */
 async function fetchOpenRouterModels(opts: FetchOptions): Promise<ModelInfo[]> {
-  const base = (opts.baseUrl || DEFAULT_BASE_URL.openrouter).replace(/\/+$/, '')
+  const base = normalizeBaseUrl('openrouter', opts.baseUrl)
   const res = await fetch(`${base}/models`, { signal: opts.signal })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
