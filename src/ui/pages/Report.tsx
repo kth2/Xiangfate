@@ -7,6 +7,7 @@ import { appendFollowUp, getRecord, saveRecord, type HistoryRecord } from '@/db/
 import { useAnalysis } from '@/store/analysis.store'
 import { useSettings } from '@/store/settings.store'
 import { BANNER, CARE_CARD, FULL_DISCLAIMER, SHORT_DISCLAIMER } from '@/copy/disclaimer.zh-CN'
+import { PRESET_HINT, presetsFor } from '@/copy/questions.zh-CN'
 import type { AnalysisEnvelope } from '@/core/types'
 import { Markdown } from '../components/Markdown'
 import { ScoreCardView } from '../components/ScoreCard'
@@ -43,6 +44,12 @@ export function Report() {
 
   const spec = envelope ? TYPE_SPECS[envelope.analysisType] : type ? TYPE_SPECS[type] : null
   const accent = spec?.accent ?? 'var(--color-gold-400)'
+
+  // 预设问题：问过的就撤掉，免得点重复
+  const asked = new Set(followUps.map((f) => f.question))
+  const presets = envelope
+    ? presetsFor(envelope.analysisType).filter((p) => !asked.has(p.text))
+    : []
 
   /* ---- 历史记录：从 IndexedDB 读 ---- */
   useEffect(() => {
@@ -118,9 +125,13 @@ export function Report() {
   useEffect(() => () => abortRef.current?.abort(), [])
 
   /* ---- 追问 ---- */
-  async function onAsk(e: React.FormEvent) {
+  function onAsk(e: React.FormEvent) {
     e.preventDefault()
-    const q = question.trim()
+    void ask(question)
+  }
+
+  async function ask(raw: string) {
+    const q = raw.trim()
     if (!q || asking) return
 
     // 历史记录页重新提问时，会话已丢失 —— 重建一个
@@ -295,6 +306,27 @@ export function Report() {
                 <p className="text-[12px] leading-loose whitespace-pre-line text-muted">
                   {CARE_CARD.body}
                 </p>
+              </div>
+            )}
+
+            {/* ---- 预设问题：来自 docs/xiangshu-qa-knowledge.md ---- */}
+            {presets.length > 0 && (
+              <div className="mb-4">
+                <p className="mb-2 text-[11px] text-subtle">{PRESET_HINT}</p>
+                <div className="flex flex-wrap gap-2">
+                  {presets.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      disabled={asking}
+                      onClick={() => void ask(p.text)}
+                      className="border px-3 py-1.5 text-left text-[12px] text-muted disabled:opacity-40"
+                      style={{ borderColor: 'var(--line)', borderRadius: 2 }}
+                    >
+                      {p.text}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 

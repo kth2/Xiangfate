@@ -1,7 +1,9 @@
 /**
  * 四类专用 User Prompt + 追问模板。与 docs/04-prompts.md 第三、四节同源。
+ * 追问部分另注入 docs/xiangshu-qa-knowledge.md 的主题应对方向。
  */
 
+import { ANSWER_STRUCTURE, detectTopics, TOPIC_GUIDES, TYPE_QA_NOTES } from '@/core/qa'
 import { explainScorecard } from '@/core/scorecard'
 import { SCORE_DIMENSIONS, type AnalysisEnvelope, type AnalysisType } from '@/core/types'
 
@@ -169,11 +171,30 @@ ${topics.length ? topics.join('、') : '（未指定，请按标准结构均衡�
 请严格按 System 中定义的六段式输出。`
 }
 
-export function buildFollowUpPrompt(question: string, turn: number): string {
+export interface FollowUpOptions {
+  /** 用于注入该相术专属的应答提醒 */
+  type: AnalysisType
+  /** 命中重大人生决定关键词（由 core/guard.preflightQuestion 判定） */
+  majorDecision?: boolean
+}
+
+/**
+ * 追问 Prompt。
+ *
+ * 除固定要求外，会按问题主题注入知识库里的「术士应对方向」与「本项目口径」——
+ * 只注入命中的那几条，问什么给什么，避免把整本知识库塞进每一轮上下文。
+ */
+export function buildFollowUpPrompt(question: string, turn: number, opts: FollowUpOptions): string {
   return `【追问轮次】第 ${turn} 轮
 
 用户的问题：${question}
+${topicBlock(question)}
+【回答结构】按这个顺序组织，不要写小标题，自然成段：
+${ANSWER_STRUCTURE.map((s, i) => `${i + 1}. ${s}`).join('\n')}
 
+【本类相术的应答提醒】
+${TYPE_QA_NOTES[opts.type].map((n) => `· ${n}`).join('\n')}
+${opts.majorDecision ? MAJOR_DECISION_NOTE : ''}
 回答要求：
 1. 仍然只能基于上面那份特征数据立论。若问题涉及的特征不在数据中，
    或位于 unavailable 列表，请直接说明「这一点本次测量没有覆盖」，
@@ -186,6 +207,30 @@ export function buildFollowUpPrompt(question: string, turn: number): string {
    请温和地把它转回到「传统相法怎么看这类特征」以及「你可以怎么做」，
    而不是给出是/否的断言。`
 }
+
+/**
+ * 命中主题时注入的方向提示。
+ * approach 是传统术士的答法，boundary 是本项目盖过传统做法的地方 —— 两者必须成对出现，
+ * 只给 approach 等于放模型去按旧规矩答。
+ */
+function topicBlock(question: string): string {
+  const topics = detectTopics(question).slice(0, 3)
+  if (!topics.length) return '\n'
+
+  const lines = topics.map((t) => {
+    const g = TOPIC_GUIDES[t]
+    return `· ${g.label}：${g.approach}${g.boundary ? `\n  本项目口径：${g.boundary}` : ''}`
+  })
+  return `
+【这个问题的传统应对方向】
+${lines.join('\n')}
+`
+}
+
+const MAJOR_DECISION_NOTE = `
+【注意】这个问题牵涉重大人生决定。先用一句话说明这类事不该靠相术来定，
+再就其中「你自己是怎样的人、怎么用力更顺」的部分作答，不要给出该不该做的建议。
+`
 
 /** 从第 4 轮起用本地摘要替换首份报告全文，控制上下文长度 */
 export function summarizeReport(report: string, maxChars = 200): string {
