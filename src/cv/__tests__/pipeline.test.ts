@@ -36,11 +36,29 @@ function makeImageData(w: number, h: number): ImageData {
   } as ImageData
 }
 
+/**
+ * 固定种子的伪随机数（mulberry32）。
+ *
+ * 底噪本身是要的 —— 真实手机照片没有纯色背景，去掉噪声等于放宽了测试。
+ * 但用 Math.random() 会让每次跑的图都不一样，Gabor 那条断言约每三次挂一次。
+ * 换成定种子：噪声还在，图却是可复现的，失败也就能复现。
+ */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
 /** 造一张浅底 + 若干条暗线的图，模拟掌纹 */
 function synthPalm(lines: { x1: number; y1: number; x2: number; y2: number }[]): ImageData {
   const img = makeImageData(W, H)
+  const rand = mulberry32(0x5eed)
   for (let i = 0; i < img.data.length; i += 4) {
-    const base = 190 + (Math.random() - 0.5) * 8
+    const base = 190 + (rand() - 0.5) * 8
     img.data[i] = base
     img.data[i + 1] = base
     img.data[i + 2] = base * 0.92
@@ -98,7 +116,32 @@ describe('Gabor 谷线增强', () => {
   it('暗线位置的响应高于空白区', () => {
     const img = synthPalm([{ x1: 40, y1: 128, x2: 216, y2: 128 }])
     const resp = gaborMaxResponse(clahe(toGray(img), 8, 2))
-    expect(resp.data[128 * W + 128]).toBeGreaterThan(resp.data[40 * W + 128])
+
+    // 比区域均值而不是单个像素：单点对单点，噪声一抖就翻盘，
+    // 断言的就不是「Gabor 认得出谷线」而是「这一个像素今天运气如何」。
+    // 初版正是这么写的 —— 谷线中心 214、空白 215，约三次挂一次，
+    // 掩盖了跨方向取最大值时把极性弄反的真 bug。
+    const onLine = meanOf(resp.data, 60, 127, 196, 130)
+    const blank = meanOf(resp.data, 60, 40, 196, 48)
+    expect(onLine).toBeGreaterThan(blank * 5)
+  })
+
+  it('响应峰落在谷线中心，并向两侧单调衰减', () => {
+    // 极性反了的时候，峰不在线上、剖面也不是这个形状，这条能挡住
+    const resp = gaborMaxResponse(
+      clahe(toGray(synthPalm([{ x1: 40, y1: 128, x2: 216, y2: 128 }])), 8, 2),
+    )
+    const row = (y: number) => meanOf(resp.data, 60, y, 196, y + 1)
+
+    // 只在峰附近要求单调：再往外就是背景底噪（CLAHE 会把平坦区的噪声拉起来，
+    // 稳定在 10 出头），那里的高低是噪声排列，不该拿来断言
+    const rising = [124, 126, 127, 128].map(row)
+    for (let i = 1; i < rising.length; i++) {
+      expect(rising[i]).toBeGreaterThan(rising[i - 1])
+    }
+    expect(row(128)).toBeGreaterThan(row(129))
+    expect(row(128)).toBeGreaterThan(200)
+    expect(row(120)).toBeLessThan(40)
   })
 
   it('输出无 NaN / Infinity', () => {
@@ -238,6 +281,13 @@ describe('端到端：合成掌纹图', () => {
     }
   })
 })
+
+/** 取 [x0,x1) × [y0,y1) 这块矩形的均值 */
+function meanOf(a: Float32Array, x0: number, y0: number, x1: number, y1: number): number {
+  let sum = 0
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) sum += a[y * W + x]
+  return sum / ((x1 - x0) * (y1 - y0))
+}
 
 function count(a: Uint8Array): number {
   let c = 0

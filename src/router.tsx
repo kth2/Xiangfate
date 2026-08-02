@@ -5,7 +5,7 @@ import { Home } from './ui/pages/Home'
 import { Loading } from './ui/components/Loading'
 
 /**
- * 路由用 React Router 7 而非文档 06 里提过的 TanStack Router：
+ * 路由用 React Router 而非文档 06 里提过的 TanStack Router：
  * 分析会话状态实际住在 Zustand（analysis.store），URL 只需要携带 analysisType，
  * 类型安全 search params 的收益因此很有限，不值得多一层 codegen。
  */
