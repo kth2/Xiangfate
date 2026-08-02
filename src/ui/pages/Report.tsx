@@ -205,7 +205,11 @@ export function Report() {
       <div className="rule-gold my-6" />
 
       <div className="flex flex-col gap-5">
-        <ScoreCardView scorecard={envelope.scorecard} accent={accent} />
+        <ScoreCardView
+          scorecard={envelope.scorecard}
+          features={envelope.features}
+          accent={accent}
+        />
 
         <FeatureList
           features={envelope.features}

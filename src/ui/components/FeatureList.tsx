@@ -23,7 +23,9 @@ export function FeatureList({
   unavailable: UnavailableItem[]
   accent: string
 }) {
-  const [open, setOpen] = useState(false)
+  // 默认展开：这一栏才是本应用真正在做的事 —— 按传统相法逐项给出的解读。
+  // 收起来之后用户只看得到 AI 那段文字，会以为 App 什么也没算
+  const [open, setOpen] = useState(true)
 
   const grouped = useMemo(() => {
     const g = new Map<string, FeatureItem[]>()
@@ -43,9 +45,9 @@ export function FeatureList({
         className="flex w-full items-center justify-between p-4 text-left"
       >
         <div>
-          <h2 className="font-title text-sm tracking-[0.2em]">实测特征</h2>
+          <h2 className="font-title text-sm tracking-[0.2em]">实测特征与相理</h2>
           <p className="mt-1 text-[11px] text-subtle">
-            测得 {features.length} 项，未观测 {unavailable.length} 项
+            测得 {features.length} 项，未观测 {unavailable.length} 项 · 释义出自传统相法
           </p>
         </div>
         <span className="font-title text-[13px] text-muted">{open ? '收起' : '展开'}</span>
@@ -70,8 +72,19 @@ export function FeatureList({
                         可信度 {Math.round(f.confidence * 100)}%
                       </span>
                     </div>
-                    <p className="mt-1 text-[12px] leading-relaxed text-muted">{f.evidence}</p>
-                    {f.source && <p className="mt-0.5 text-[11px] text-subtle">《{f.source}》</p>}
+                    {/* 相理释义 —— 规则算出来的传统解读。
+                        之前这里只渲染了 evidence（一串数字），meaning 白算了，
+                        用户看到的就只有测量值，没有任何「所以呢」 */}
+                    {f.meaning && (
+                      <p className="mt-1 text-[12.5px] leading-relaxed">
+                        {f.meaning}
+                        {f.source && (
+                          <span className="ml-1.5 text-[11px] text-subtle">《{f.source}》</span>
+                        )}
+                      </p>
+                    )}
+                    {/* 实测依据放在后面，字号更小 —— 想核对的人才需要看数字 */}
+                    <p className="mt-1 text-[11px] leading-relaxed text-subtle">实测：{f.evidence}</p>
                   </li>
                 ))}
               </ul>

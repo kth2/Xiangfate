@@ -10,7 +10,13 @@
  */
 
 import { BAND_VALUE } from './band'
-import { SCORE_DIMENSIONS, type FeatureItem, type ScoreDimension, type Scorecard } from './types'
+import {
+  SCORE_DIMENSIONS,
+  type Classic,
+  type FeatureItem,
+  type ScoreDimension,
+  type Scorecard,
+} from './types'
 
 /** 特征 id 前缀 → 各维度权重。同一条特征可以贡献多个维度 */
 type WeightMap = Record<string, Partial<Record<ScoreDimension, number>>>
@@ -128,6 +134,97 @@ export function computeScorecard(features: FeatureItem[]): Scorecard {
     const ratio = num[dim] / den[dim]
     // ratio 落在 [0.1, 0.9]，映射到 1–5 星
     out[dim] = Math.min(5, Math.max(1, Math.round(1 + ((ratio - 0.1) / 0.8) * 4)))
+  }
+  return out
+}
+
+/* ============================================================
+   星级的来由
+   ============================================================ */
+
+/** balanced 的分值，用作「中和线」—— 传统相术以中和为贵 */
+const NEUTRAL = BAND_VALUE.balanced
+
+export interface DimensionDriver {
+  id: string
+  /** 传统术语，如「天庭饱满」 */
+  label: string
+  /** 该条相理的释义 */
+  meaning: string
+  source: Classic | null
+  /**
+   * 相对中和线的方向。
+   * ⚠️ very_high 记 'excess' 而非 'up'：过盛在传统相术里反而减分，
+   * 直接标成「减分」会让用户以为测错了，得说清楚是「过犹不及」。
+   */
+  direction: 'up' | 'down' | 'excess'
+  /** 对该维度的影响力，用于排序 */
+  influence: number
+}
+
+export interface DimensionExplain {
+  stars: number
+  /** 参与该维度计算的特征条数 */
+  count: number
+  /** 特征太少、星级取的是中性回落值 */
+  neutralFallback: boolean
+  /** 影响最大的几条，已排序 */
+  drivers: DimensionDriver[]
+}
+
+/**
+ * 拆解每一维的星级是怎么来的。
+ *
+ * 与 computeScorecard 用同一张权重表、同一套 band 分值，因此展示出来的
+ * 理由和星级必然一致 —— 不是事后编的解释，就是计算过程本身。
+ * 同样不经 AI：同一张照片每次给出同样的理由。
+ */
+export function explainScorecard(
+  features: FeatureItem[],
+  topN = 3,
+): Record<ScoreDimension, DimensionExplain> {
+  const scorecard = computeScorecard(features)
+  const buckets: Record<ScoreDimension, DimensionDriver[]> = {
+    气度格局: [],
+    才智思辨: [],
+    人际情感: [],
+    执行意志: [],
+    根基福泽: [],
+  }
+  const den: Record<ScoreDimension, number> = blank()
+
+  for (const f of features) {
+    const w = weightsFor(f.id)
+    if (!w) continue
+    const v = BAND_VALUE[f.band]
+    for (const [dim, weight] of Object.entries(w) as [ScoreDimension, number][]) {
+      den[dim] += weight * f.confidence
+      // 正好落在中和线上的（balanced / categorical）不算驱动项：
+      // 它们既没往上推也没往下拉，列出来只会稀释真正的理由
+      if (v === NEUTRAL) continue
+      buckets[dim].push({
+        id: f.id,
+        label: f.label,
+        meaning: f.meaning,
+        source: f.source,
+        direction: f.band === 'very_high' ? 'excess' : v > NEUTRAL ? 'up' : 'down',
+        influence: weight * f.confidence * Math.abs(v - NEUTRAL),
+      })
+    }
+  }
+
+  const out = {} as Record<ScoreDimension, DimensionExplain>
+  for (const dim of SCORE_DIMENSIONS) {
+    const drivers = buckets[dim]
+      .sort((a, b) => b.influence - a.influence || a.id.localeCompare(b.id))
+      .slice(0, topN)
+    out[dim] = {
+      stars: scorecard[dim],
+      count: features.filter((f) => weightsFor(f.id)?.[dim] !== undefined).length,
+      // 与 computeScorecard 里的回落条件保持一致
+      neutralFallback: den[dim] < 0.5,
+      drivers,
+    }
   }
   return out
 }
