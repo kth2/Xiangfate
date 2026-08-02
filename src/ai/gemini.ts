@@ -11,7 +11,7 @@ import {
   type ChatMessage,
   type GenerateOptions,
 } from './provider'
-import { DEFAULT_BASE_URL } from './models'
+import { normalizeBaseUrl } from './models'
 
 interface GeminiPart {
   text?: string
@@ -27,9 +27,9 @@ interface GeminiChunk {
 export function createGeminiProvider(
   apiKey: string,
   model: string,
-  baseUrl = DEFAULT_BASE_URL.gemini,
+  baseUrl?: string,
 ): AIProvider {
-  const base = baseUrl.replace(/\/+$/, '')
+  const base = normalizeBaseUrl('gemini', baseUrl)
 
   return {
     id: 'gemini',

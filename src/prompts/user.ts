@@ -2,7 +2,8 @@
  * 四类专用 User Prompt + 追问模板。与 docs/04-prompts.md 第三、四节同源。
  */
 
-import type { AnalysisEnvelope, AnalysisType } from '@/core/types'
+import { explainScorecard } from '@/core/scorecard'
+import { SCORE_DIMENSIONS, type AnalysisEnvelope, type AnalysisType } from '@/core/types'
 
 const HEAD: Record<AnalysisType, string> = {
   mianxiang: `【本次解读类型】面相
@@ -116,12 +117,51 @@ function pickTop(metrics: Record<string, unknown>, n: number): Record<string, un
   return Object.fromEntries(entries)
 }
 
+/**
+ * 把本地算出的五维星级连同「凭哪几条相理算出来的」一起写进 prompt。
+ *
+ * 星级由 core/scorecard 用固定权重算出，不经 AI —— 但之前它压根没进 prompt，
+ * 模型看不到，报告里的论断因此可能和用户眼前的星级互相打架。
+ * 现在把结论和依据一并给它，让它做「串起来讲」的事，而不是另起炉灶。
+ */
+function scorecardBlock(env: AnalysisEnvelope): string {
+  const explain = explainScorecard(env.features)
+  const lines = SCORE_DIMENSIONS.map((dim) => {
+    const e = explain[dim]
+    if (e.neutralFallback) {
+      return `  · ${dim}：${e.stars} 星（该维特征不足，取中性值，请勿据此发挥）`
+    }
+    const drivers = e.drivers.length
+      ? e.drivers
+          .map(
+            (d) =>
+              `${d.label}（${d.direction === 'up' ? '推高' : d.direction === 'excess' ? '过盛反损' : '拉低'}）`,
+          )
+          .join('、')
+      : '各项均在中和区间'
+    return `  · ${dim}：${e.stars} 星 ← ${drivers}`
+  })
+
+  return `【本地已算出的五维星级 —— 由固定规则计算，不是你生成的】
+${lines.join('\n')}
+
+这份星级已经显示在用户眼前。你的任务是把它讲通：
+  1. 论断必须与星级一致。不要说出与某一维星级明显矛盾的话
+     （例如「执行意志」2 星却大谈其行动力过人）。
+  2. 不要复述星级数字，也不要重新打分或换算成百分比 —— 那是规则的事。
+  3. 上面「←」后面列的相理，是该维度得分的主要来由，
+     展开时应优先落在这些条目上，让用户看得出星级从何而来。
+  4. 标注「取中性值」的维度，说明本次没测到足够特征，不要就该维度作实质论断。`
+}
+
 export function buildUserPrompt(env: AnalysisEnvelope): string {
   const topics = env.subject?.focusTopics?.filter(Boolean) ?? []
   return `${HEAD[env.analysisType]}
 
 【结构化特征数据】
 ${JSON.stringify(trimEnvelope(env), null, 1)}
+
+${scorecardBlock(env)}
 
 【用户关注方向】
 ${topics.length ? topics.join('、') : '（未指定，请按标准结构均衡展开。）'}

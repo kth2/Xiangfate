@@ -11,7 +11,7 @@ import {
   type ChatMessage,
   type GenerateOptions,
 } from './provider'
-import { DEFAULT_BASE_URL } from './models'
+import { normalizeBaseUrl } from './models'
 
 interface ORChunk {
   choices?: { delta?: { content?: string }; finish_reason?: string }[]
@@ -21,9 +21,9 @@ interface ORChunk {
 export function createOpenRouterProvider(
   apiKey: string,
   model: string,
-  baseUrl = DEFAULT_BASE_URL.openrouter,
+  baseUrl?: string,
 ): AIProvider {
-  const endpoint = `${baseUrl.replace(/\/+$/, '')}/chat/completions`
+  const endpoint = `${normalizeBaseUrl('openrouter', baseUrl)}/chat/completions`
 
   return {
     id: 'openrouter',

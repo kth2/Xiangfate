@@ -5,7 +5,7 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { DEFAULT_BASE_URL, type ProviderId } from '@/ai/models'
+import { type ProviderId } from '@/ai/models'
 
 export type { ProviderId }
 export type ThemeMode = 'dark' | 'light' | 'system'
@@ -118,9 +118,4 @@ export const useSettings = create<SettingsState>()(
 /** 当前 provider 是否已配置好可用的 Key */
 export function useIsConfigured(): boolean {
   return useSettings((s) => s.configs[s.provider].apiKey.trim().length > 0)
-}
-
-/** 解析出实际使用的端点 */
-export function resolveBaseUrl(p: ProviderId, cfg: ProviderConfig): string {
-  return cfg.baseUrl.trim() || DEFAULT_BASE_URL[p]
 }
