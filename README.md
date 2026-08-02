@@ -176,6 +176,16 @@ Header 走 `public/_headers`（构建时被复制进 `dist/`）。
 > 规范化成 `/`，于是这条规则又匹配回 `/*`，被判定为无限循环，
 > 整个部署直接失败（错误码 **100324**）。
 > 现在这条规则只留在 `netlify.toml` 里，Cloudflare 和 Vercel 各用各的机制。
+>
+> `postbuild` 上挂了 `scripts/strip-redirects.mjs` 作为兜底：每次构建后强制
+> 清除 `dist/_redirects`。Cloudflare 构建机会「Restoring from build output cache」，
+> 万一旧文件被缓存带回来，这一步能拦住。构建日志里会打印是否命中，
+> 便于判断残留到底来自缓存还是别处。
+
+**如果部署仍然报 100324**，八成是构建跑的不是最新提交（Cloudflare 的构建可能排队，
+或者手动重跑了某个旧 deployment）。确认一下 CF 控制台里那次构建对应的 commit
+是不是包含了删除 `public/_redirects` 的那一版；也可以在 CF 的
+Settings → Build → 清一次 build cache 再重试。
 
 ### Netlify
 
