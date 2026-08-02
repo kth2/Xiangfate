@@ -44,8 +44,8 @@ export const DEFAULT_BASE_URL: Record<ProviderId, string> = {
 
 const FALLBACK: Record<ProviderId, ModelInfo[]> = {
   gemini: [
-    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', contextLength: 1_048_576, free: true },
-    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', contextLength: 1_048_576, free: false },
+    { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash', contextLength: 1_048_576, free: true },
+    { id: 'gemini-3.5-flash', label: 'Gemini 3.5 flash', contextLength: 1_048_576, free: false },
   ],
   openrouter: [
     {
