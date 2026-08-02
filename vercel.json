@@ -5,8 +5,8 @@
   "framework": "vite",
   "rewrites": [
     {
-      "_comment": "SPA 回退。把 index.html 自身也排除在外，避免目标又匹配到源模式（Cloudflare 就是栽在这上面，见 netlify.toml 的注释）",
-      "source": "/((?!assets/|mediapipe/|icons/|index\\.html|_headers|sw\\.js|workbox-.*\\.js|manifest\\.webmanifest|registerSW\\.js).*)",
+      "_comment": "SPA 回退。Vercel 会先匹配静态文件，匹配不到才走 rewrite，所以这条 catch-all 不会拦截 /assets/* 与 /mediapipe/*。用官方推荐的最简写法，正则越复杂越容易出意外。",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ],

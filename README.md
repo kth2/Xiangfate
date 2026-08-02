@@ -139,63 +139,54 @@ DevTools 都能拿到。公开部署请用 `proxy` 模式。
 
 ## 部署
 
-三家都配好了，选一个即可。部署后拿到的 HTTPS 地址在手机浏览器打开，
-再「添加到主屏幕」，就是一个可安装的 PWA。
+推荐 **Vercel** 或 **Netlify**，两家都已配好，导入仓库即可。
+部署后拿到的 HTTPS 地址在手机浏览器打开，再「添加到主屏幕」，就是可安装的 PWA。
 
 ### Vercel（推荐）
 
+**方式一：网页导入，不用装任何东西**
+1. 打开 <https://vercel.com/new>
+2. 选这个仓库 → Import
+3. 框架会自动识别为 Vite，构建命令与输出目录都由 `vercel.json` 指定，**什么都不用改**
+4. Deploy
+
+**方式二：命令行**
 ```bash
 npm i -g vercel
-vercel            # 首次会问几个问题，一路默认即可
 vercel --prod
 ```
-配置在 `vercel.json`：SPA 回退、静态资源长缓存、`Permissions-Policy: camera=(self)`。
 
-### Cloudflare（Workers 静态资源 / Pages）
-
-在控制台新建项目并连上仓库，然后填：
-- **Build command**：`npm run build`
-- **Build output directory**：`dist`
-- **Node 版本**：22
-
-Header 走 `public/_headers`（构建时被复制进 `dist/`）。
-
-**SPA 回退由 `wrangler.jsonc` 的 `not_found_handling` 负责**，不要用 `_redirects`：
-
-```jsonc
-{
-  "assets": {
-    "directory": "./dist",
-    "not_found_handling": "single-page-application"
-  }
-}
-```
-
-> ⚠️ **踩过的坑**：本项目一度在 `public/_redirects` 里放了通用的 SPA 写法
-> `/*  /index.html  200`。Cloudflare 的静态资源服务会把 `/index.html`
-> 规范化成 `/`，于是这条规则又匹配回 `/*`，被判定为无限循环，
-> 整个部署直接失败（错误码 **100324**）。
-> 现在这条规则只留在 `netlify.toml` 里，Cloudflare 和 Vercel 各用各的机制。
->
-> `postbuild` 上挂了 `scripts/strip-redirects.mjs` 作为兜底：每次构建后强制
-> 清除 `dist/_redirects`。Cloudflare 构建机会「Restoring from build output cache」，
-> 万一旧文件被缓存带回来，这一步能拦住。构建日志里会打印是否命中，
-> 便于判断残留到底来自缓存还是别处。
-
-**如果部署仍然报 100324**，八成是构建跑的不是最新提交（Cloudflare 的构建可能排队，
-或者手动重跑了某个旧 deployment）。确认一下 CF 控制台里那次构建对应的 commit
-是不是包含了删除 `public/_redirects` 的那一版；也可以在 CF 的
-Settings → Build → 清一次 build cache 再重试。
+`vercel.json` 里已经配好 SPA 回退、静态资源长缓存，以及
+`Permissions-Policy: camera=(self)`（手机上要相机权限，这条是必需的）。
 
 ### Netlify
 
-连上仓库即可，`netlify.toml` 已经配好（SPA 回退 + 缓存头都在里面）。
+导入仓库即可，`netlify.toml` 已配好 SPA 回退与缓存头。
+Build command `npm run build`，publish directory `dist`。
+
+### Cloudflare（⚠️ 已知会卡住，建议避开）
+
+Cloudflare Workers 的静态资源服务对 `_redirects` 的处理有个坑：它会把
+`/index.html` 规范化成 `/`，于是通用的 SPA 写法 `/*  /index.html  200`
+会重新匹配回 `/*`，被判定为无限循环，部署直接失败（错误码 **100324**）。
+
+本项目已经完全不用这个文件了 —— `public/_redirects` 已删除，`postbuild`
+还挂了 `scripts/strip-redirects.mjs` 强制清除任何残留。但实际部署中该报错
+仍然复现过，怀疑与 Cloudflare 的构建缓存或资源存储有关，**尚未定位**。
+
+如果你一定要用 Cloudflare，可以试试：
+- Settings → Build → 清一次 build cache 后重试
+- 确认构建对应的 commit 确实包含了删除 `_redirects` 的那一版
+- 看构建日志里 `[cleanup]` 那一行，判断残留到底有没有被拦下
+
+在这个问题定位清楚之前，用 Vercel 或 Netlify 更省事。
 
 ### 部署体积说明
 
-`public/mediapipe/` 里的 wasm 运行时约 **22 MB**，由 `postinstall` 从 `node_modules`
-复制而来（不入库）。只复制真正会被加载的两个变体 —— `FilesetResolver` 的路径拼装
-逻辑决定了 `_module_` 那一套永远不会被请求，排除它省下约 12 MB。
+产物约 **23 MB / 26 个文件**，其中 22 MB 是 `public/mediapipe/` 里的 wasm
+运行时，由 `postinstall` 从 `node_modules` 复制而来（不入库）。
+只复制真正会被加载的两个变体 —— `FilesetResolver` 的路径拼装逻辑决定了
+`_module_` 那一套永远不会被请求，排除它省下约 12 MB。
 
 三个 `.task` 模型（共约 17 MB）不打进包，首次用到某个类型时才从 Google 的
 CDN 下载，之后由 Service Worker 缓存 90 天。
