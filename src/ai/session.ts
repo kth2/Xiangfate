@@ -13,13 +13,21 @@ import { createGeminiProvider } from './gemini'
 import { createOpenRouterProvider } from './openrouter'
 import type { AIProvider, ChatMessage } from './provider'
 
-export function createProvider(id: string, apiKey: string, model: string): AIProvider {
+export function createProvider(
+  id: string,
+  apiKey: string,
+  model: string,
+  baseUrl?: string,
+): AIProvider {
   if (!apiKey.trim()) {
     throw new Error('还没配置 API Key，先去设置页填一个')
   }
+  if (!model.trim()) {
+    throw new Error('还没选模型，去设置页挑一个')
+  }
   return id === 'openrouter'
-    ? createOpenRouterProvider(apiKey, model)
-    : createGeminiProvider(apiKey, model)
+    ? createOpenRouterProvider(apiKey, model, baseUrl)
+    : createGeminiProvider(apiKey, model, baseUrl)
 }
 
 export interface StreamEvent {

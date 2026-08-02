@@ -11,22 +11,27 @@ import {
   type ChatMessage,
   type GenerateOptions,
 } from './provider'
-
-const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
+import { DEFAULT_BASE_URL } from './models'
 
 interface ORChunk {
   choices?: { delta?: { content?: string }; finish_reason?: string }[]
   error?: { message?: string }
 }
 
-export function createOpenRouterProvider(apiKey: string, model: string): AIProvider {
+export function createOpenRouterProvider(
+  apiKey: string,
+  model: string,
+  baseUrl = DEFAULT_BASE_URL.openrouter,
+): AIProvider {
+  const endpoint = `${baseUrl.replace(/\/+$/, '')}/chat/completions`
+
   return {
     id: 'openrouter',
     model,
     async *stream(messages: ChatMessage[], opts: GenerateOptions = {}) {
       let res: Response
       try {
-        res = await fetch(ENDPOINT, {
+        res = await fetch(endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

@@ -11,8 +11,7 @@ import {
   type ChatMessage,
   type GenerateOptions,
 } from './provider'
-
-const BASE = 'https://generativelanguage.googleapis.com/v1beta'
+import { DEFAULT_BASE_URL } from './models'
 
 interface GeminiPart {
   text?: string
@@ -25,7 +24,13 @@ interface GeminiChunk {
   promptFeedback?: { blockReason?: string }
 }
 
-export function createGeminiProvider(apiKey: string, model: string): AIProvider {
+export function createGeminiProvider(
+  apiKey: string,
+  model: string,
+  baseUrl = DEFAULT_BASE_URL.gemini,
+): AIProvider {
+  const base = baseUrl.replace(/\/+$/, '')
+
   return {
     id: 'gemini',
     model,
@@ -49,7 +54,7 @@ export function createGeminiProvider(apiKey: string, model: string): AIProvider 
       let res: Response
       try {
         res = await fetch(
-          `${BASE}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`,
+          `${base}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },

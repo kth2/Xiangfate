@@ -119,8 +119,22 @@ npm run build       # 产物在 dist/
 npm run preview
 ```
 
-> `public/mediapipe/` 由 `scripts/copy-mediapipe-wasm.mjs` 生成（约 34 MB），已 gitignore。
+> `public/mediapipe/` 由 `scripts/copy-mediapipe-wasm.mjs` 生成（约 22 MB），已 gitignore。
 > 之所以不走 CDN：走自己的域名才能真正离线可用。
+
+### 关于模型选择
+
+模型列表**从服务商 API 实时拉取**，不是写死在代码里的 ——
+服务商上了新模型，刷新一下就能选到。
+
+- **Gemini**：调 `models.list`，需要先填 Key；自动滤掉 embedding / imagen / TTS 这类非对话模型
+- **OpenRouter**：`GET /models` 是公开端点，不填 Key 也能浏览；免费模型排在最前并打「免费」标
+- 列表本地缓存 24 小时，随时可以点「刷新列表」取最新
+- 拉不到时回落到缓存或内置兜底清单，界面上会标明来源
+- 任何时候都能**手动填模型 ID**，不被我们的列表限制
+- 选中的模型如果不在服务商的实时列表里（下线或改名），会明确警告
+
+「高级设置」里可以覆盖**接口地址**，走自建代理或镜像时用得上，留空即默认。
 
 ### 关于 API Key
 
@@ -139,36 +153,54 @@ DevTools 都能拿到。公开部署请用 `proxy` 模式。
 
 ## 部署
 
-三家都配好了，选一个即可。部署后拿到的 HTTPS 地址在手机浏览器打开，
-再「添加到主屏幕」，就是一个可安装的 PWA。
+推荐 **Vercel** 或 **Netlify**，两家都已配好，导入仓库即可。
+部署后拿到的 HTTPS 地址在手机浏览器打开，再「添加到主屏幕」，就是可安装的 PWA。
 
 ### Vercel（推荐）
 
+**方式一：网页导入，不用装任何东西**
+1. 打开 <https://vercel.com/new>
+2. 选这个仓库 → Import
+3. 框架会自动识别为 Vite，构建命令与输出目录都由 `vercel.json` 指定，**什么都不用改**
+4. Deploy
+
+**方式二：命令行**
 ```bash
 npm i -g vercel
-vercel            # 首次会问几个问题，一路默认即可
 vercel --prod
 ```
-配置在 `vercel.json`：SPA 回退、静态资源长缓存、`Permissions-Policy: camera=(self)`。
 
-### Cloudflare Pages
-
-在控制台新建项目并连上仓库，然后填：
-- **Build command**：`npm run build`
-- **Build output directory**：`dist`
-- **Node 版本**：22
-
-SPA 回退与 header 走 `public/_redirects` 与 `public/_headers`（构建时会被复制进 `dist/`）。
+`vercel.json` 里已经配好 SPA 回退、静态资源长缓存，以及
+`Permissions-Policy: camera=(self)`（手机上要相机权限，这条是必需的）。
 
 ### Netlify
 
-连上仓库即可，`netlify.toml` 已经配好。
+导入仓库即可，`netlify.toml` 已配好 SPA 回退与缓存头。
+Build command `npm run build`，publish directory `dist`。
+
+### Cloudflare（⚠️ 已知会卡住，建议避开）
+
+Cloudflare Workers 的静态资源服务对 `_redirects` 的处理有个坑：它会把
+`/index.html` 规范化成 `/`，于是通用的 SPA 写法 `/*  /index.html  200`
+会重新匹配回 `/*`，被判定为无限循环，部署直接失败（错误码 **100324**）。
+
+本项目已经完全不用这个文件了 —— `public/_redirects` 已删除，`postbuild`
+还挂了 `scripts/strip-redirects.mjs` 强制清除任何残留。但实际部署中该报错
+仍然复现过，怀疑与 Cloudflare 的构建缓存或资源存储有关，**尚未定位**。
+
+如果你一定要用 Cloudflare，可以试试：
+- Settings → Build → 清一次 build cache 后重试
+- 确认构建对应的 commit 确实包含了删除 `_redirects` 的那一版
+- 看构建日志里 `[cleanup]` 那一行，判断残留到底有没有被拦下
+
+在这个问题定位清楚之前，用 Vercel 或 Netlify 更省事。
 
 ### 部署体积说明
 
-`public/mediapipe/` 里的 wasm 运行时约 **22 MB**，由 `postinstall` 从 `node_modules`
-复制而来（不入库）。只复制真正会被加载的两个变体 —— `FilesetResolver` 的路径拼装
-逻辑决定了 `_module_` 那一套永远不会被请求，排除它省下约 12 MB。
+产物约 **23 MB / 26 个文件**，其中 22 MB 是 `public/mediapipe/` 里的 wasm
+运行时，由 `postinstall` 从 `node_modules` 复制而来（不入库）。
+只复制真正会被加载的两个变体 —— `FilesetResolver` 的路径拼装逻辑决定了
+`_module_` 那一套永远不会被请求，排除它省下约 12 MB。
 
 三个 `.task` 模型（共约 17 MB）不打进包，首次用到某个类型时才从 Google 的
 CDN 下载，之后由 Service Worker 缓存 90 天。
@@ -178,7 +210,7 @@ CDN 下载，之后由 Service Worker 缓存 90 天。
 ## 技术栈
 
 React 19 · TypeScript · Vite · Tailwind CSS 4 · Zustand · React Router 7 ·
-`@mediapipe/tasks-vision@1.0.1` · Gemini 2.5 Flash / OpenRouter · vite-plugin-pwa · idb
+`@mediapipe/tasks-vision@1.0.1` · Google Gemini / OpenRouter · vite-plugin-pwa · idb
 
 掌纹提取是自研的 CV 管线（CLAHE → Gabor 滤波器组 → 自适应阈值 → 形态学 →
 Zhang-Suen 细化 → 骨架追踪），跑在 Web Worker 里。

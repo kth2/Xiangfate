@@ -12,7 +12,8 @@
     "typecheck": "tsc -b",
     "prebuild": "node scripts/copy-mediapipe-wasm.mjs",
     "predev": "node scripts/copy-mediapipe-wasm.mjs",
-    "postinstall": "node scripts/copy-mediapipe-wasm.mjs"
+    "postinstall": "node scripts/copy-mediapipe-wasm.mjs",
+    "postbuild": "node scripts/strip-redirects.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",

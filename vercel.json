@@ -5,7 +5,8 @@
   "framework": "vite",
   "rewrites": [
     {
-      "source": "/((?!assets/|mediapipe/|icons/|sw\\.js|workbox-.*\\.js|manifest\\.webmanifest|registerSW\\.js).*)",
+      "_comment": "SPA 回退。Vercel 会先匹配静态文件，匹配不到才走 rewrite，所以这条 catch-all 不会拦截 /assets/* 与 /mediapipe/*。用官方推荐的最简写法，正则越复杂越容易出意外。",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ],
