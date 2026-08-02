@@ -5,52 +5,66 @@
 
 import { describe, expect, it } from 'vitest'
 import { finalizeReport, guardReport, preflightQuestion } from '../guard'
-import { REQUIRED_SECTIONS } from '../guard.rules'
 import type { UnavailableItem } from '../types'
 
-/** 造一份结构合法、长度达标的报告，把待测句子插进「性格特质」 */
+/**
+ * 造一份报告，把待测句子插进正文。
+ *
+ * 版式故意写得随意 —— guard 已经不管小节名、节数和长度了，
+ * 这些用例只该因为「内容」通过或失败，不该因为「格式」。
+ */
 function makeReport(injected = ''): string {
   const filler = '三停比例大体匀称，传统相法认为这类格局的人一生节奏相对平稳，做事有自己的分寸。'
-  return REQUIRED_SECTIONS.map((s) => {
-    const body = s === '性格特质' ? `${injected}${filler.repeat(4)}` : filler.repeat(4)
-    return `## ${s}\n\n${body}`
-  }).join('\n\n')
+  return `## 先说测到了什么\n\n${filler}\n\n### 性情\n\n${injected}${filler}\n\n随手一段没有标题的话。${filler}`
 }
 
 const unavailable: UnavailableItem[] = [
   { id: 'face.ear', label: '耳相', reason: 'not_observable', detail: '正面照拍不到' },
 ]
 
-describe('结构校验', () => {
-  it('六段齐全的报告通过', () => {
+describe('版式不再受限 —— 用户明确要求让模型自由发挥', () => {
+  it('自定小节名、自定节数的报告照过', () => {
     const r = guardReport(makeReport(), unavailable)
     expect(r.shouldRegenerate).toBe(false)
-    for (const s of REQUIRED_SECTIONS) expect(r.text).toContain(`## ${s}`)
+    expect(r.hits).toEqual([])
+    expect(r.text).toContain('## 先说测到了什么')
+    expect(r.text).toContain('### 性情')
   })
 
-  it('缺小节触发重生成', () => {
-    const partial = makeReport().replace('## 发展建议', '## 其他')
-    const r = guardReport(partial, unavailable)
+  it('完全没有标题也照过', () => {
+    const r = guardReport('三停匀称，做事有分寸。行文平实，不分小节。', unavailable)
+    expect(r.shouldRegenerate).toBe(false)
+    expect(r.hits).toEqual([])
+  })
+
+  it('很短的报告不再触发重生成', () => {
+    // 旧规则要求 500 字起，达不到就整篇重来 —— 用户看到的就是那句
+    // 「全文过短，请按各段字数要求展开到 1000–1500 字」
+    const r = guardReport('三停匀称。', unavailable)
+    expect(r.shouldRegenerate).toBe(false)
+    expect(r.hits).toEqual([])
+  })
+
+  it('很长的报告也不再触发重生成', () => {
+    const r = guardReport('三停匀称，做事有分寸。'.repeat(400), unavailable)
+    expect(r.shouldRegenerate).toBe(false)
+  })
+
+  it('模型自拟的小节标题不会被剔除', () => {
+    const r = guardReport(`${makeReport()}\n\n## 几点可以留意的方向\n\n作息规律些。`, unavailable)
+    expect(r.text).toContain('几点可以留意的方向')
+  })
+
+  it('内容违规仍然照拦 —— 放开的是版式，不是红线', () => {
+    const r = guardReport('三停匀称。你注定会大富大贵。', unavailable)
     expect(r.shouldRegenerate).toBe(true)
-    expect(r.hits.some((h) => h.category === 'structure')).toBe(true)
-  })
-
-  it('白名单外的小节被剔除', () => {
-    const extra = `${makeReport()}\n\n## 开运建议\n\n买个手串戴上就好了。`
-    const r = guardReport(extra, unavailable)
-    expect(r.text).not.toContain('开运建议')
-    expect(r.text).not.toContain('手串')
+    expect(r.hits.some((h) => h.category === 'absolute')).toBe(true)
   })
 
   it('剥掉模型自作主张包上的代码块', () => {
     const fenced = '```markdown\n' + makeReport() + '\n```'
     const r = guardReport(fenced, unavailable)
-    expect(r.text.startsWith('## 特征识别')).toBe(true)
-  })
-
-  it('过短触发重生成', () => {
-    const short = REQUIRED_SECTIONS.map((s) => `## ${s}\n\n简。`).join('\n\n')
-    expect(guardReport(short, unavailable).shouldRegenerate).toBe(true)
+    expect(r.text.startsWith('## 先说测到了什么')).toBe(true)
   })
 })
 
@@ -75,10 +89,11 @@ describe('内容过滤 —— 直接删句的类别', () => {
     })
   }
 
-  it('删句不会破坏其余内容', () => {
+  it('删句不会破坏其余内容与标题', () => {
     const r = finalizeReport(makeReport('这样的面相容易克夫。'), unavailable)
     expect(r.text).toContain('三停比例大体匀称')
-    for (const s of REQUIRED_SECTIONS) expect(r.text).toContain(`## ${s}`)
+    expect(r.text).toContain('## 先说测到了什么')
+    expect(r.text).toContain('### 性情')
   })
 })
 
@@ -112,18 +127,6 @@ describe('JSON 字段名泄漏', () => {
   it('复述数据结构的句子被删', () => {
     const r = finalizeReport(makeReport('该特征的 confidence 为 0.52。'), unavailable)
     expect(r.text).not.toContain('confidence')
-  })
-})
-
-describe('空节兜底', () => {
-  it('内容被删光的小节换成如实说明，而不是留空标题', () => {
-    const bad = REQUIRED_SECTIONS.map((s) =>
-      s === '状态提示' ? `## ${s}\n\n气色发黄说明肝胆有问题。` : `## ${s}\n\n${'平稳匀称，节奏得当。'.repeat(8)}`,
-    ).join('\n\n')
-    const r = finalizeReport(bad, unavailable)
-    expect(r.text).toContain('## 状态提示')
-    expect(r.text).not.toContain('肝胆')
-    expect(r.text).toContain('暂略')
   })
 })
 

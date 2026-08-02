@@ -239,11 +239,67 @@ function blank(): Record<ScoreDimension, number> {
   }
 }
 
-/** 各维度的一句话说明，报告页展示用 */
-export const DIMENSION_DESC: Record<ScoreDimension, string> = {
-  气度格局: '整体格局与气象',
-  才智思辨: '思考与判断的取向',
-  人际情感: '与人相处的方式',
-  执行意志: '推动事情的力度',
-  根基福泽: '积累与稳定性',
+/* ============================================================
+   五维在传统相术里各主什么
+   ============================================================ */
+
+export interface DimensionMeaning {
+  /** 白话一句，说清这一维在讲什么 */
+  brief: string
+  /** 传统体系中大致对应的范畴 */
+  scope: string
+  /**
+   * 相理释义，1–2 句。
+   * 用「主／多主／宜」句式，不下绝对判断 —— 传统相书本身也是这么说话的。
+   */
+  traditional: string
+  source: Classic
 }
+
+/**
+ * 这五维不是凭空造的现代标签，各自对应传统相法里的一组部位与宫位。
+ * 之前这里只有一句干巴巴的现代白话（「整体格局与气象」），
+ * 用户看不出它和相术有什么关系，也就无从判断这颗星到底在说什么。
+ */
+export const DIMENSION_MEANING: Record<ScoreDimension, DimensionMeaning> = {
+  气度格局: {
+    brief: '整体格局与气象',
+    scope: '事业格局、社会位置、一生气象',
+    traditional:
+      '相家论人，先论格局。五岳朝拱、三停匀称者，多主气象开阔、行事有容；格局偏窄者，宜借外缘、稳中求进。',
+    source: '麻衣神相',
+  },
+  才智思辨: {
+    brief: '思考与判断的取向',
+    scope: '学业、谋虑、见事之明',
+    traditional:
+      '额主早年学业与思虑，眼神主决断。额广眼清者，多主思路明快、见事在先；反之则宜谋定而后动，不急于表态。',
+    source: '神相全编',
+  },
+  人际情感: {
+    brief: '与人相处的方式',
+    scope: '情感、交游、人缘',
+    traditional:
+      '眉为兄弟宫，主交游；口为出纳官，主言语情性。眉清口正者，多主待人和厚、缘分不薄；宜以诚相接，不宜争胜。',
+    source: '柳庄相法',
+  },
+  执行意志: {
+    brief: '推动事情的力度',
+    scope: '事业推动、行动力、中年主运',
+    traditional:
+      '鼻为中岳，主一身之权；颧主行事之力。鼻直颧称者，多主有主见、肯任事；过刚者宜留转圜余地，刚极则易折。',
+    source: '麻衣神相',
+  },
+  根基福泽: {
+    brief: '积累与稳定性',
+    scope: '财帛、根基、晚年运势',
+    traditional:
+      '地阁主晚景，财帛宫主积蓄。地阁方圆、准头丰隆者，多主根基厚实、渐积而成；单薄者宜早作规划，重在养蓄。',
+    source: '水镜神相',
+  },
+}
+
+/** 各维度的一句话说明，报告页展示用 */
+export const DIMENSION_DESC: Record<ScoreDimension, string> = Object.fromEntries(
+  SCORE_DIMENSIONS.map((d) => [d, DIMENSION_MEANING[d].brief]),
+) as Record<ScoreDimension, string>

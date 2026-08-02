@@ -2,7 +2,7 @@
  * 四类专用 User Prompt + 追问模板。与 docs/04-prompts.md 第三、四节同源。
  */
 
-import { explainScorecard } from '@/core/scorecard'
+import { DIMENSION_MEANING, explainScorecard } from '@/core/scorecard'
 import { SCORE_DIMENSIONS, type AnalysisEnvelope, type AnalysisType } from '@/core/types'
 
 const HEAD: Record<AnalysisType, string> = {
@@ -47,9 +47,9 @@ derived.lineDetection 记录了每条主线的检测情况：
     这在相学上本身就有其含义（例如命运线不显主不拘固定轨道），
     但**不要**假装它被测到了，也不要描述它的长短深浅。
   · corrected=true 的线：该线由用户手动校正确认，可正常解读，
-    但请在「特征识别」中以「（经你本人确认）」标注一次。
+    但请在首次提到该线时以「（经你本人确认）」标注一次。
   · handsCaptured 只有一只手时，不要对另一只手作任何推测，
-    并在运势段说明「本次仅测一手，先天/后天对照暂缺」。`,
+    并说明「本次仅测一手，先天/后天对照暂缺」。`,
 
   guxiang: `【本次解读类型】骨相
 
@@ -60,7 +60,7 @@ derived.lineDetection 记录了每条主线的检测情况：
   · 肩骨、脊椎、骨盆 —— 若用户提供了体照，由 Pose 关键点推算
   · 头型 —— 需正面照 + 侧面照共同估算颅指数；缺侧面照时不可判定
 
-因此这是一份「基于体表框架的骨相推估」，请在「特征识别」开头用一句话向用户说明这一点。
+因此这是一份「基于体表框架的骨相推估」，请在报告开头用一句话向用户说明这一点。
 
 【解读重点】
   1. 骨相三原则：先头后体、骨肉并重、整体协调（《太清神鉴》）
@@ -72,7 +72,7 @@ derived.lineDetection 记录了每条主线的检测情况：
 【绝对边界】
 derived.unobservableBones（通常包含枕骨、顶骨、耳后骨）以及龙骨、三台骨、反骨等
 特殊骨相，**照片无法观测**。严禁对它们作任何论断、暗示或「一般而言」式的补充。
-请在「特征识别」末尾如实说明：
+请在谈完可观测的骨之后如实说明：
 「传统九骨中的〈列出名称〉需要实际触诊或多角度观察，本次照片无法获取，故不作论断。」`,
 
   tixiang: `【本次解读类型】体相
@@ -128,8 +128,15 @@ function scorecardBlock(env: AnalysisEnvelope): string {
   const explain = explainScorecard(env.features)
   const lines = SCORE_DIMENSIONS.map((dim) => {
     const e = explain[dim]
+    const m = DIMENSION_MEANING[dim]
+    // 星数取 envelope 里存下来的那份 —— 那才是用户眼前看到的。
+    // explain 会自己重算一遍，正常情况下两者一致，但历史记录跨版本时可能不同，
+    // 真到那时候，宁可让模型跟着用户看到的走
+    const stars = env.scorecard[dim]
+    // 带上该维在传统体系里对应的范畴，模型才知道该往哪个方向展开
+    const head = `  · ${dim}（传统对应${m.scope}；${m.traditional}——《${m.source}》）`
     if (e.neutralFallback) {
-      return `  · ${dim}：${e.stars} 星（该维特征不足，取中性值，请勿据此发挥）`
+      return `${head}\n      ${stars} 星，该维特征不足，取中性值，请勿据此发挥`
     }
     const drivers = e.drivers.length
       ? e.drivers
@@ -139,7 +146,7 @@ function scorecardBlock(env: AnalysisEnvelope): string {
           )
           .join('、')
       : '各项均在中和区间'
-    return `  · ${dim}：${e.stars} 星 ← ${drivers}`
+    return `${head}\n      ${stars} 星 ← ${drivers}`
   })
 
   return `【本地已算出的五维星级 —— 由固定规则计算，不是你生成的】
@@ -164,9 +171,9 @@ ${JSON.stringify(trimEnvelope(env), null, 1)}
 ${scorecardBlock(env)}
 
 【用户关注方向】
-${topics.length ? topics.join('、') : '（未指定，请按标准结构均衡展开。）'}
+${topics.length ? topics.join('、') : '（未指定，按特征数据的实际情况均衡展开即可。）'}
 
-请严格按 System 中定义的六段式输出。`
+请按 System 中的要求输出。版式自行安排。`
 }
 
 export function buildFollowUpPrompt(question: string, turn: number): string {
@@ -178,8 +185,8 @@ export function buildFollowUpPrompt(question: string, turn: number): string {
 1. 仍然只能基于上面那份特征数据立论。若问题涉及的特征不在数据中，
    或位于 unavailable 列表，请直接说明「这一点本次测量没有覆盖」，
    并说明需要什么条件才能测到（例如「需要补一张侧面照」）。
-2. 不要重复输出六段式报告结构。直接针对问题作答。
-3. 长度 200–500 字，用自然段，最多用一个小列表。
+2. 不要重复输出整份报告的结构。直接针对问题作答。
+3. 长度自行把握，够答清楚就行，不必凑字数。
 4. System 中的所有禁止事项继续有效，尤其是：
    不预测具体事件与时间、不作疾病诊断、不作寿夭判断、不用绝对化措辞。
 5. 若用户追问的是「我到底能不能……」「会不会……」这类求确定答案的问题，
@@ -187,16 +194,36 @@ export function buildFollowUpPrompt(question: string, turn: number): string {
    而不是给出是/否的断言。`
 }
 
-/** 从第 4 轮起用本地摘要替换首份报告全文，控制上下文长度 */
+/**
+ * 从第 4 轮起用本地摘要替换首份报告全文，控制上下文长度。
+ *
+ * 版式已经交给模型自己定，所以不能再假设一定有 `##` 小节 ——
+ * 可能是 `###`、可能一个标题都没有。按标题切得动就按标题切，
+ * 切不动就退回按段落取头几句，总之不能因为没标题就返回空串。
+ */
 export function summarizeReport(report: string, maxChars = 200): string {
-  const sections = report.split(/(?=^##\s)/m).filter((s) => s.trim())
-  const picked = sections
-    .map((s) => {
-      const nl = s.indexOf('\n')
-      const title = s.slice(3, nl > 0 ? nl : undefined).trim()
-      const body = (nl > 0 ? s.slice(nl) : '').replace(/[-*·#\s]+/g, ' ').trim()
-      return `${title}：${body.slice(0, 40)}`
-    })
-    .join('；')
+  const clean = (s: string) => s.replace(/[-*·#>\s]+/g, ' ').trim()
+
+  const sections = report.split(/(?=^#{2,4}\s)/m).filter((s) => s.trim())
+  const hasHeadings = sections.some((s) => /^#{2,4}\s/.test(s))
+
+  const picked = hasHeadings
+    ? sections
+        .map((s) => {
+          const nl = s.indexOf('\n')
+          const head = nl > 0 ? s.slice(0, nl) : s
+          const title = clean(head)
+          const body = clean(nl > 0 ? s.slice(nl) : '')
+          return title ? `${title}：${body.slice(0, 40)}` : body.slice(0, 40)
+        })
+        .filter(Boolean)
+        .join('；')
+    : report
+        .split(/\n{2,}/)
+        .map(clean)
+        .filter(Boolean)
+        .map((p) => p.slice(0, 60))
+        .join('；')
+
   return picked.length > maxChars ? `${picked.slice(0, maxChars)}…` : picked
 }

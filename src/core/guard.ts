@@ -1,20 +1,22 @@
 /**
  * AI 输出后置校验。渲染前必过。
  *
- * 处置分两档：
+ * ⚠️ 只管内容，不管版式。
+ * 早先这里还强制六个固定小节和 1000–1500 字，达不到就整篇重生成 ——
+ * 用户看到的是「措辞不合规范，正在重新生成」，实际上文字并没有问题，
+ * 只是没按模板写。那是把模板当成了安全要求，已经去掉：
+ * 小节怎么分、写多长，交给模型自己拿捏。
+ *
+ * 留下的是真正的内容红线，处置分两档：
  *   regenerate —— 值得再要一次（措辞问题，模型通常改得掉）
  *   strip      —— 直接删句，不给第二次机会（涉及寿夭/疾病/污名，重生成有二次风险）
- *
- * 删句后若某小节内容过短，整节替换为一句实话，而不是留个空标题。
  */
 
 import {
   BANNED_TIME_PREDICTION,
   CATEGORY_ACTION,
   CRISIS_KEYWORDS,
-  LENGTH,
   MAJOR_DECISION_KEYWORDS,
-  REQUIRED_SECTIONS,
   WORD_LISTS,
   type GuardCategory,
 } from './guard.rules'
@@ -36,7 +38,6 @@ export interface GuardResult {
   stripped: number
 }
 
-const SECTION_RE = /^##\s+(.+?)\s*$/gm
 /** 中英文句子切分，保留标点 */
 const SENTENCE_RE = /[^。！？；\n]+[。！？；]?/g
 
@@ -51,20 +52,9 @@ export function guardReport(
   // 有些模型会用代码块把 markdown 包起来，先剥掉
   text = text.replace(/^```(?:markdown|md)?\n([\s\S]*?)\n```$/m, '$1').trim()
 
-  /* ---- 结构检查 ---- */
-  const found = [...text.matchAll(SECTION_RE)].map((m) => m[1].trim())
-  const missing = REQUIRED_SECTIONS.filter((s) => !found.includes(s))
-  if (missing.length) {
-    hits.push({ category: 'structure', token: `缺少小节 ${missing.join('/')}`, action: 'regenerate' })
-  }
-  // 白名单外的小节直接剔除
-  const extras = found.filter((s) => !(REQUIRED_SECTIONS as readonly string[]).includes(s))
-  for (const extra of extras) {
-    text = removeSection(text, extra)
-    hits.push({ category: 'structure', token: `多余小节 ${extra}`, action: 'strip' })
-  }
-
-  /* ---- 逐句过滤 ---- */
+  /* ---- 逐句过滤 ----
+     只管内容安全（疾病论断、绝对化预测、对不可测项下结论等）。
+     版式一概不管：小节叫什么、有几节、多长，都交给模型自己拿捏。 */
   const unavailableLabels = unavailable.map((u) => u.label).filter((l) => l.length >= 2)
   let stripped = 0
 
@@ -104,17 +94,6 @@ export function guardReport(
 
   text = kept.join('\n')
 
-  /* ---- 长度 ---- */
-  const len = text.replace(/\s/g, '').length
-  if (len < LENGTH.min) {
-    hits.push({ category: 'structure', token: `过短 ${len} 字`, action: 'regenerate' })
-  } else if (len > LENGTH.max) {
-    hits.push({ category: 'structure', token: `过长 ${len} 字`, action: 'regenerate' })
-  }
-
-  /* ---- 空节兜底 ---- */
-  text = fillEmptySections(text)
-
   const wantsRegen = hits.some((h) => h.action === 'regenerate')
   return {
     text: text.trim(),
@@ -149,7 +128,7 @@ export function finalizeReport(raw: string, unavailable: UnavailableItem[] = [])
   }
 
   return {
-    text: fillEmptySections(kept.join('\n')).trim(),
+    text: kept.join('\n').trim(),
     hits: first.hits,
     shouldRegenerate: false,
     stripped,
@@ -175,37 +154,6 @@ function scanSentence(s: string, unavailableLabels: string[]): GuardHit | null {
     }
   }
   return null
-}
-
-/**
- * 整节删除。用切分而不是正则 —— JS 没有 \z 锚点，
- * 「匹配到下一个 ## 或字符串结尾」用正则写很容易出边界 bug。
- */
-function removeSection(text: string, heading: string): string {
-  return text
-    .split(/(?=^##\s)/m)
-    .filter((part) => {
-      if (!part.startsWith('##')) return true
-      const nl = part.indexOf('\n')
-      const title = part.slice(2, nl > 0 ? nl : undefined).trim()
-      return title !== heading
-    })
-    .join('')
-}
-
-const EMPTY_NOTE = '（本次测得的特征不足以就这一部分展开，暂略。）'
-
-function fillEmptySections(text: string): string {
-  const parts = text.split(/(?=^##\s)/m)
-  return parts
-    .map((part) => {
-      if (!part.startsWith('##')) return part
-      const nl = part.indexOf('\n')
-      if (nl < 0) return `${part}\n\n${EMPTY_NOTE}\n`
-      const body = part.slice(nl).replace(/\s/g, '')
-      return body.length < 50 ? `${part.slice(0, nl)}\n\n${EMPTY_NOTE}\n` : part
-    })
-    .join('')
 }
 
 /* ============================================================

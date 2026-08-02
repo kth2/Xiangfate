@@ -171,7 +171,11 @@ describe('规则映射', () => {
       expect(f.confidence).toBeLessThanOrEqual(1)
       expect(f.evidence).toMatch(/\d/)
       expect(f.label.length).toBeGreaterThan(0)
-      expect(f.meaning.length).toBeGreaterThan(0)
+      // 每条特征都得有相理释义 —— 只给数值等于没解读
+      expect(f.meaning.trim().length, `${f.id} 缺少相理释义`).toBeGreaterThanOrEqual(6)
+      for (const w of ['必定', '一定', '注定', '绝对', '短命', '克夫']) {
+        expect(f.meaning.includes(w), `${f.id} 的释义出现了「${w}」`).toBe(false)
+      }
     }
   })
 

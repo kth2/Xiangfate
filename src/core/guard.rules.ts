@@ -88,18 +88,6 @@ export const WORD_LISTS: [GuardCategory, string[]][] = [
   ['jargon', BANNED_JARGON],
 ]
 
-/** 报告必须包含且仅包含这些二级标题，顺序固定 */
-export const REQUIRED_SECTIONS = [
-  '特征识别',
-  '性格特质',
-  '能力倾向',
-  '运势倾向',
-  '状态提示',
-  '发展建议',
-] as const
-
-export const LENGTH = { min: 500, max: 2500 } as const
-
 /** 情绪危机关键词 —— 命中则不发送该轮请求给 AI，直接出关怀卡片 */
 export const CRISIS_KEYWORDS = [
   '自杀', '想死', '活不下去', '不想活', '结束生命', '自残', '割腕',

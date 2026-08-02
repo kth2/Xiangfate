@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { DIMENSION_DESC, explainScorecard, type DimensionDriver } from '@/core/scorecard'
+import { DIMENSION_MEANING, explainScorecard, type DimensionDriver } from '@/core/scorecard'
 import { SCORE_DIMENSIONS, type FeatureItem, type Scorecard } from '@/core/types'
 import { SCORECARD_NOTE } from '@/copy/disclaimer.zh-CN'
 
@@ -65,8 +65,18 @@ export function ScoreCardView({
 
               {open && (
                 <div className="pb-4 pl-1">
-                  <p className="mb-3 text-[11px] leading-relaxed text-subtle">
-                    {DIMENSION_DESC[dim]}
+                  {/* 这一维在传统相术里主什么 —— 先说范畴，再说相理 */}
+                  <p className="mb-1.5 text-[11px] tracking-[0.1em] text-subtle">
+                    {DIMENSION_MEANING[dim].brief} · 传统对应{DIMENSION_MEANING[dim].scope}
+                  </p>
+                  <p
+                    className="mb-4 border-l-2 py-1 pl-3 text-[12px] leading-relaxed text-muted"
+                    style={{ borderColor: 'var(--line)' }}
+                  >
+                    {DIMENSION_MEANING[dim].traditional}
+                    <span className="ml-1 text-[11px] text-subtle">
+                      《{DIMENSION_MEANING[dim].source}》
+                    </span>
                   </p>
 
                   {e.neutralFallback ? (

@@ -101,6 +101,27 @@ export interface DraftFeature extends Omit<FeatureItem, 'confidence'> {
   lowConfidenceDetail?: string
 }
 
+/** 相理释义的最短长度。低于这个基本是占位符，不是解读 */
+const MIN_MEANING_LEN = 6
+
+/**
+ * 每一条要展示给用户的特征都必须带相理释义。
+ *
+ * 用户的原话：「不要只显示数值或分档结果」。释义是规则层的产出，
+ * 四个模块各写各的 push()，漏掉一条不会有任何编译错误，
+ * 只会在界面上表现为「有数字没解释」—— 正是之前 FeatureList
+ * 没渲染 meaning 时的样子。所以在唯一出口上把它钉死。
+ *
+ * 开发期直接抛错，好在写规则时立刻发现；线上不抛 ——
+ * 少一句释义不该让整份报告出不来。
+ */
+function assertHasMeaning(d: DraftFeature): void {
+  if (d.meaning && d.meaning.trim().length >= MIN_MEANING_LEN) return
+  const msg = `特征 ${d.id}（${d.label}）缺少相理释义 —— 每条展示给用户的特征都要有解读，不能只给数值`
+  if (import.meta.env?.DEV) throw new Error(msg)
+  console.warn(`[xiangfate] ${msg}`)
+}
+
 /**
  * 把草稿特征分流成 features / unavailable。
  * 这是「测得到才说，测不到就标记为不可用」原则的执行点 —— 唯一入口，不要绕过。
@@ -114,6 +135,7 @@ export function partitionByConfidence(drafts: DraftFeature[]): {
 
   for (const d of drafts) {
     if (d.confidence >= MIN_CONFIDENCE) {
+      assertHasMeaning(d)
       const { lowConfidenceDetail: _drop, ...item } = d
       features.push({ ...item, confidence: round(d.confidence) })
     } else {
