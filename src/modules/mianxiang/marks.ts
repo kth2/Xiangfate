@@ -54,6 +54,12 @@ export interface MoleResult {
 export interface EyeBagResult {
   /** 卧蚕隆起：亮脊 + 其下暗沟的落差，0–1 */
   ridge: number
+  /**
+   * 相对同一张脸颊部起伏的倍数。理由同 NasolabialResult.depthRatio ——
+   * 绝对落差里混着光照方向，除掉同脸的平颊基线才有可比性。
+   * 0 表示没取到可用基线。
+   */
+  ridgeRatio: number
   /** 泪堂深陷：眼下带比颊部明显更暗的程度，0–1 */
   hollow: number
 }
@@ -61,6 +67,15 @@ export interface EyeBagResult {
 export interface NasolabialResult {
   /** 纹深：沿线各处的局部暗度中位数，0–1 */
   depth: number
+  /**
+   * 相对同一张脸颊部平肌肤的倍数。
+   *
+   * depth 的绝对值受光照硬度、镜头锐度、压缩强度影响很大 ——
+   * 同一张脸窗边拍和室内灯下拍能差一倍，拿它去比固定阈值是不可靠的。
+   * 这里再取一条**平行于法令、偏外侧落在平颊上**的对照线，测同样的统计量，
+   * 相除之后光照与锐度基本抵消，剩下的才是「这道沟比这张脸的普通皮肤深多少」。
+   */
+  depthRatio: number
   /** 连续性：能测到清晰凹线的采样点占比，0–1 */
   continuity: number
   /** 是否延伸过口角水平线（传统「法令入口」的判定前提） */
@@ -260,29 +275,44 @@ export function measureEyeBag(img: ImageData, lm: P3[], side: 'left' | 'right'):
   }
 
   const N = 12
-  const profile: number[] = []
-  for (let k = 0; k <= N; k++) {
-    const v = rowMean(lid.y + (stripH * k) / N)
-    if (v === null) return { ridge: 0, hollow: 0 }
-    profile.push(v)
+  const nil: EyeBagResult = { ridge: 0, ridgeRatio: 0, hollow: 0 }
+
+  /** 从 y0 起向下取一段的亮度剖面，返回「峰谷落差 ÷ 峰值」 */
+  const reliefAt = (y0: number): number | null => {
+    const profile: number[] = []
+    for (let k = 0; k <= N; k++) {
+      const v = rowMean(y0 + (stripH * k) / N)
+      if (v === null) return null
+      profile.push(v)
+    }
+    let peakIdx = 0
+    for (let k = 1; k <= Math.floor(N / 2); k++) if (profile[k] > profile[peakIdx]) peakIdx = k
+    let troughIdx = peakIdx
+    for (let k = peakIdx; k <= N; k++) if (profile[k] < profile[troughIdx]) troughIdx = k
+    const peak = profile[peakIdx]
+    return peak > 1 ? Math.max(0, (peak - profile[troughIdx]) / peak) : 0
   }
 
-  // 亮脊在上半段，暗沟在其下
-  let peakIdx = 0
-  for (let k = 1; k <= Math.floor(N / 2); k++) if (profile[k] > profile[peakIdx]) peakIdx = k
-  let troughIdx = peakIdx
-  for (let k = peakIdx; k <= N; k++) if (profile[k] < profile[troughIdx]) troughIdx = k
+  const ridge = reliefAt(lid.y)
+  if (ridge === null) return nil
 
-  const peak = profile[peakIdx]
-  const trough = profile[troughIdx]
-  const ridge = peak > 1 ? Math.max(0, (peak - trough) / peak) : 0
+  // 对照：再往下一整条带，那里是平颊，同样算峰谷落差 —— 光照方向的影响两边一样
+  const control = reliefAt(lid.y + stripH * 1.6)
+  const ridgeRatio = control === null ? 0 : ridge / Math.max(control, 0.02)
 
-  // 颊部基准取眼下带再往下一段
   const cheek = rowMean(lid.y + stripH * 1.9)
-  const bandMin = Math.min(...profile)
-  const hollow = cheek && cheek > 1 ? Math.max(0, (cheek - bandMin) / cheek) : 0
+  const bandMin = Math.min(
+    ...Array.from({ length: N + 1 }, (_, k) => rowMean(lid.y + (stripH * k) / N) ?? Infinity),
+  )
+  const hollow = cheek && cheek > 1 && Number.isFinite(bandMin)
+    ? Math.max(0, (cheek - bandMin) / cheek)
+    : 0
 
-  return { ridge: +Math.min(1, ridge).toFixed(3), hollow: +Math.min(1, hollow).toFixed(3) }
+  return {
+    ridge: +Math.min(1, ridge).toFixed(3),
+    ridgeRatio: +Math.min(20, ridgeRatio).toFixed(2),
+    hollow: +Math.min(1, hollow).toFixed(3),
+  }
 }
 
 /* ============================================================
@@ -302,61 +332,83 @@ export function measureNasolabial(
   const alar = pt(lm[side === 'left' ? NOSE.alarLeft : NOSE.alarRight])
   const corner = pt(lm[side === 'left' ? MOUTH.cornerLeft : MOUTH.cornerRight])
   const iod = iodPx(lm, img.width)
+  const nil: NasolabialResult = { depth: 0, depthRatio: 0, continuity: 0, pastMouthCorner: false }
 
   // 向下外侧延长 40%：法令过口角与否是传统关注点
   const end = { x: alar.x + (corner.x - alar.x) * 1.4, y: alar.y + (corner.y - alar.y) * 1.4 }
   const dx = end.x - alar.x
   const dy = end.y - alar.y
   const len = Math.hypot(dx * img.width, dy * img.height)
-  if (len < 12) return { depth: 0, continuity: 0, pastMouthCorner: false }
+  if (len < 12) return nil
 
   // 垂线方向（归一化坐标下的单位法向）
   const nx = -dy / Math.hypot(dx, dy)
   const ny = dx / Math.hypot(dx, dy)
   const halfW = (iod * 0.07) / img.width
 
-  const N = 20
-  const depths: number[] = []
-  let clear = 0
-  let clearBelowCorner = 0
-  let belowCornerTotal = 0
+  const scan = (offset: number) => {
+    const N = 20
+    const depths: number[] = []
+    let clear = 0
+    let clearBelowCorner = 0
+    let belowCornerTotal = 0
 
-  for (let k = 2; k <= N; k++) {
-    const t = k / N
-    const cx = alar.x + dx * t
-    const cy = alar.y + dy * t
+    for (let k = 2; k <= N; k++) {
+      const t = k / N
+      const cx = alar.x + dx * t + nx * offset
+      const cy = alar.y + dy * t + ny * offset
 
-    const vals: number[] = []
-    const M = 14
-    for (let j = -M; j <= M; j++) {
-      const x = Math.round((cx + nx * halfW * (j / M)) * img.width)
-      const y = Math.round((cy + ny * halfW * (j / M)) * img.height)
-      if (x < 0 || y < 0 || x >= img.width || y >= img.height) continue
-      const i = (y * img.width + x) * 4
-      vals.push(0.299 * img.data[i] + 0.587 * img.data[i + 1] + 0.114 * img.data[i + 2])
+      const vals: number[] = []
+      const M = 14
+      for (let j = -M; j <= M; j++) {
+        const x = Math.round((cx + nx * halfW * (j / M)) * img.width)
+        const y = Math.round((cy + ny * halfW * (j / M)) * img.height)
+        if (x < 0 || y < 0 || x >= img.width || y >= img.height) continue
+        const i = (y * img.width + x) * 4
+        vals.push(0.299 * img.data[i] + 0.587 * img.data[i + 1] + 0.114 * img.data[i + 2])
+      }
+      if (vals.length < 10) continue
+
+      const base = median(vals)
+      const lo = Math.min(...vals)
+      const d = base > 1 ? (base - lo) / base : 0
+      depths.push(d)
+
+      const isClear = d > 0.07
+      if (isClear) clear++
+      if (cy > corner.y) {
+        belowCornerTotal++
+        if (isClear) clearBelowCorner++
+      }
     }
-    if (vals.length < 10) continue
-
-    const base = median(vals)
-    const lo = Math.min(...vals)
-    const d = base > 1 ? (base - lo) / base : 0
-    depths.push(d)
-
-    const isClear = d > 0.07
-    if (isClear) clear++
-    if (cy > corner.y) {
-      belowCornerTotal++
-      if (isClear) clearBelowCorner++
-    }
+    return { depths, clear, clearBelowCorner, belowCornerTotal }
   }
 
-  if (!depths.length) return { depth: 0, continuity: 0, pastMouthCorner: false }
+  const main = scan(0)
+  if (!main.depths.length) return nil
+
+  /*
+   * 对照线要落在**平颊**上，也就是背离面部中线的那一侧。
+   * 法向的正负号随 alar→corner 的走向变，不同的脸未必一致，
+   * 所以不去猜符号，直接比哪个方向离中线更远。
+   */
+  const midX = lm[NOSE.tip].x
+  const probe = (sign: number) => Math.abs(alar.x + dx * 0.5 + nx * halfW * 2 * sign - midX)
+  const outward = probe(1) >= probe(-1) ? 1 : -1
+  const control = scan(halfW * 2 * outward)
+
+  const depth = Math.min(1, median(main.depths))
+  // 对照采样不足（多半是越到脸外了）→ 不给比值，规则层只看绝对深度
+  const controlDepth = control.depths.length >= 5 ? median(control.depths) : null
+  const ratio = controlDepth === null ? 0 : depth / Math.max(controlDepth, 0.02)
 
   return {
-    depth: +Math.min(1, median(depths)).toFixed(3),
-    continuity: +(clear / depths.length).toFixed(3),
+    depth: +depth.toFixed(3),
+    depthRatio: +Math.min(20, ratio).toFixed(2),
+    continuity: +(main.clear / main.depths.length).toFixed(3),
     // 口角以下仍有一半以上采样点看得到纹沟，才算延伸过口角
-    pastMouthCorner: belowCornerTotal >= 3 && clearBelowCorner / belowCornerTotal >= 0.5,
+    pastMouthCorner:
+      main.belowCornerTotal >= 3 && main.clearBelowCorner / main.belowCornerTotal >= 0.5,
   }
 }
 

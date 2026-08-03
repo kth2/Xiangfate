@@ -51,8 +51,20 @@ export async function loadImageFile(file: File): Promise<LoadedImage> {
   return { bitmap, width, height, previewUrl }
 }
 
-/** 从 <video> 抓一帧（相机拍摄路径）。视频帧本就没有 EXIF。 */
-export async function captureVideoFrame(video: HTMLVideoElement): Promise<LoadedImage> {
+/**
+ * 连拍：同一机位、同一角度，短时间内抓若干帧。
+ *
+ * 目的不是拿新信息（那是多角度的事），而是把逐帧都在变的噪声平均掉 ——
+ * 传感器噪声、微动模糊、一瞬间的表情、自动曝光浮动、关键点检测器自身的抖动。
+ * 详见 core/frames.ts。
+ *
+ * 帧全部留在内存里，用完由调用方 close()；和单张一样不落盘、不上传。
+ */
+export async function captureVideoBurst(
+  video: HTMLVideoElement,
+  count = 5,
+  gapMs = 120,
+): Promise<{ bitmaps: ImageBitmap[]; previewUrl: string; width: number; height: number }> {
   const sw = video.videoWidth
   const sh = video.videoHeight
   if (!sw || !sh) throw new Error('相机还没准备好')
@@ -61,12 +73,19 @@ export async function captureVideoFrame(video: HTMLVideoElement): Promise<Loaded
   const width = Math.round(sw * scale)
   const height = Math.round(sh * scale)
 
-  const { canvas, ctx } = makeCanvas2D(width, height)
-  ctx.drawImage(video, 0, 0, width, height)
+  const bitmaps: ImageBitmap[] = []
+  let previewUrl = ''
 
-  const bitmap = await createImageBitmap(canvas as never)
-  const previewUrl = await canvasToObjectUrl(canvas)
-  return { bitmap, width, height, previewUrl }
+  for (let i = 0; i < count; i++) {
+    const { canvas, ctx } = makeCanvas2D(width, height)
+    ctx.drawImage(video, 0, 0, width, height)
+    bitmaps.push(await createImageBitmap(canvas as never))
+    // 第一帧同时用作预览
+    if (i === 0) previewUrl = await canvasToObjectUrl(canvas)
+    if (i < count - 1) await new Promise((r) => setTimeout(r, gapMs))
+  }
+
+  return { bitmaps, previewUrl, width, height }
 }
 
 type AnyCanvas = HTMLCanvasElement | OffscreenCanvas

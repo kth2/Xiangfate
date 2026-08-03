@@ -10,10 +10,12 @@
  */
 
 import {
+  applyMargin,
   computeConfidence,
   partitionByConfidence,
   round,
   toBand,
+  type BandSpec,
   type DraftFeature,
 } from '@/core/band'
 import type {
@@ -68,7 +70,12 @@ export function applyHandRules(input: HandRuleInput): HandRuleOutput {
     id: string, category: FeatureCategory, label: string, band: DraftFeature['band'],
     value: string | number, status: DraftFeature['status'], confidence: number,
     evidence: string, meaning: string, source: Classic | null,
-  ) => drafts.push({ id, category, label, band, value, status, confidence, evidence, meaning, source })
+    /** 该项的分档区间。给了就顺带算判线余量，贴线时压低置信度并在证据里说明 */
+    spec?: BandSpec,
+  ) => drafts.push(applyMargin(
+    { id, category, label, band, value, status, confidence, evidence, meaning, source },
+    spec,
+  ))
 
   /* ============ 手型 ============ */
   const ht = classifyHandType(m)
@@ -91,6 +98,7 @@ export function applyHandRules(input: HandRuleInput): HandRuleOutput {
         ? '随和易协作；需要拿主意时可以更果断一些'
         : '进退有度，能柔能刚',
     '神相全编',
+    T.thumb,
   )
 
   const irBand = toBand(m.indexRingRatio, T.indexRing)
@@ -105,6 +113,7 @@ export function applyHandRules(input: HandRuleInput): HandRuleOutput {
         ? '审美与艺术感受力佳，重表达'
         : '进取与审美并重',
     '水镜神相',
+    T.indexRing,
   )
 
   push(

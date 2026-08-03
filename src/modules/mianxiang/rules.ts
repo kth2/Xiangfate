@@ -9,10 +9,12 @@
  */
 
 import {
+  applyMargin,
   computeConfidence,
   partitionByConfidence,
   round,
   toBand,
+  type BandSpec,
   type DraftFeature,
 } from '@/core/band'
 import type {
@@ -76,7 +78,12 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
     evidence: string,
     meaning: string,
     source: Classic | null,
-  ) => drafts.push({ id, category, label, band, value, status, confidence, evidence, meaning, source })
+    /** 该项的分档区间。给了就顺带算判线余量，贴线时压低置信度并在证据里说明 */
+    spec?: BandSpec,
+  ) => drafts.push(applyMargin(
+    { id, category, label, band, value, status, confidence, evidence, meaning, source },
+    spec,
+  ))
 
   /* ============ 三停 ============ */
   const c = m.threeCourts
@@ -133,6 +140,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
         ? '格局开阔，长于统观全局；然失于粗疏，细处不耐烦'
         : '面窄眼大，传统主气量偏局促、易为小事所困，然感受敏锐',
     '麻衣神相',
+    T.fiveEye,
   )
 
   const gapBand = toBand(m.innerGap, T.innerGap)
@@ -147,6 +155,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
         ? '传统主心量偏窄、易执着于眼前，心事不易放下'
         : '传统主心大而疏，思路发散，收束之力不足',
     '神相全编',
+    T.innerGap,
   )
 
   /* ============ 眉 ============ */
@@ -163,6 +172,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
         ? '人际关系平衡，亲疏有度'
         : '传统主兄弟缘薄、六亲助力少，凡事多靠自己',
     '麻衣神相',
+    T.browLen,
   )
 
   // 眉形分类
@@ -187,6 +197,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
       ? '传统主心量狭窄、多思多虑，遇事易钻牛角尖，运途多滞'
       : '心胸开阔，遇事不易钻牛角尖',
     '麻衣神相',
+    T.browGap,
   )
 
   // 眉毛浓密（像素推导）
@@ -204,6 +215,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
           ? '张弛有度，做事有分寸'
           : '传统主兄弟缘薄、助力寡少，情性偏冷',
       '神相全编',
+      T.browDensity,
     )
 
     const disp = bilateral(browPixels.left.tailDispersion, browPixels.right.tailDispersion)
@@ -285,6 +297,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
         ? '性情平和，进退有据'
         : '山根低陷，古法列为中年之忌，主意志易摇、根基不固，成事须仗外力',
     '神相全编',
+    T.bridgeHeight,
   )
 
   const tfBand = toBand(n.tipFullness, T.tipFullness)
@@ -299,6 +312,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
         ? '用度有节，收支有数'
         : '准头尖薄，传统主财帛无根、聚散不定，重神而不重财',
     '麻衣神相',
+    T.tipFullness,
   )
 
   const awBand = toBand(n.alarWidth, T.alarWidth)
@@ -311,6 +325,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
       ? '财库充实，守成有力'
       : '鼻翼薄削，传统主财库不固、进易出难，守成之力偏弱',
     '神相全编',
+    T.alarWidth,
   )
 
   /* ============ 口 ============ */
@@ -327,6 +342,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
         ? '言行得体，进退有度'
         : '口小于鼻，传统主气量偏窄、食禄不丰，遇事怯于开口',
     '麻衣神相',
+    T.mouthAlar,
   )
 
   const liftBand = toBand(mo.cornerLift, T.cornerLift)
@@ -341,6 +357,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
         ? '口角下垂，传统主性情执拗、心多不平，与人相处失于亲和'
         : '神色平和，喜怒不形于色',
     '神相全编',
+    T.cornerLift,
   )
 
   const ltBand = toBand(mo.lipThickness, T.lipThickness)
@@ -355,6 +372,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
         ? '唇薄者传统主情性偏淡、待人少温，然言辞锋利、说理不让人'
         : '表达有分寸，情理兼顾',
     '麻衣神相',
+    T.lipThickness,
   )
 
   const phBand = toBand(mo.philtrumLen, T.philtrumLen)
@@ -369,6 +387,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
         ? '家庭关系平顺'
         : '人中浅短，传统主六亲缘薄、晚景少依，家中之事多不由己',
     '柳庄相法',
+    T.philtrumLen,
   )
 
   /* ============ 田宅宫 ============ */
@@ -384,6 +403,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
         ? '家宅安宁，起居有序'
         : '田宅逼窄，传统主居处不安、田产难守，性亦偏急',
     '神相全编',
+    T.tianzhai,
   )
 
   /* ============ 对称 ============ */
@@ -437,14 +457,19 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
   if (eyeBags) {
     const ridge = bilateral(eyeBags.left.ridge, eyeBags.right.ridge)
     const hollow = bilateral(eyeBags.left.hollow, eyeBags.right.hollow)
-    const full = ridge >= T.woCanFull
+    // 有同脸基线就用倍数判 —— 绝对落差里混着光照方向，跨照片没有可比性
+    const ridgeRatio = bilateral(eyeBags.left.ridgeRatio, eyeBags.right.ridgeRatio)
+    const hasBaseline = ridgeRatio > 0
+    const full = hasBaseline ? ridgeRatio >= T.woCanRidgeRatio : ridge >= T.woCanFull
     const sunken = !full && hollow >= T.tearTroughHollow
     push(
       'face.palace.nannv', '十二宫',
       full ? '卧蚕丰隆' : sunken ? '泪堂深陷' : '泪堂平顺',
       full ? 'high' : sunken ? 'low' : 'balanced',
       round(ridge), 'inferred', conf('shading'),
-      `下睑缘下方亮脊与暗沟的落差为 ${(ridge * 100).toFixed(0)}%，眼下带较颊部暗 ${(hollow * 100).toFixed(0)}%`,
+      `下睑缘下方亮脊与暗沟的落差为 ${(ridge * 100).toFixed(0)}%${
+        hasBaseline ? `，为同脸平颊起伏的 ${ridgeRatio.toFixed(1)} 倍` : '（本次未取到平颊基线，只能按绝对值判）'
+      }，眼下带较颊部暗 ${(hollow * 100).toFixed(0)}%`,
       full
         ? '男女宫丰隆，传统主精神足、异性缘厚，子女宫亦佳'
         : sunken
@@ -464,16 +489,23 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
     const depth = bilateral(nasolabial.left.depth, nasolabial.right.depth)
     const continuity = bilateral(nasolabial.left.continuity, nasolabial.right.continuity)
     const pastCorner = nasolabial.left.pastMouthCorner && nasolabial.right.pastMouthCorner
+    // 有同脸平颊基线就按倍数判，绝对深度退为兜底
+    const ratio = bilateral(nasolabial.left.depthRatio, nasolabial.right.depthRatio)
+    const hasBaseline = ratio > 0
+    const deepEnough = hasBaseline ? ratio >= T.nasolabialDeepRatio : depth >= T.nasolabialDeep
+    const faintEnough = hasBaseline ? ratio < T.nasolabialFaintRatio : depth < T.nasolabialFaint
     // 只深不连多半是鼻侧阴影，两项都过线才认
-    const deep = depth >= T.nasolabialDeep && continuity >= T.nasolabialContinuity
-    const faint = depth < T.nasolabialFaint || continuity < 0.3
+    const deep = deepEnough && continuity >= T.nasolabialContinuity
+    const faint = faintEnough || continuity < 0.3
     const nBand = toBand(depth, T.nasolabial)
 
     push(
       'face.nasolabial', '纹痣',
       deep ? (pastCorner ? '法令过口' : '法令深长') : faint ? '法令浅淡' : '法令端正',
       nBand, round(depth), 'inferred', conf('shading'),
-      `鼻翼至口角沿线的局部暗度中位数 ${(depth * 100).toFixed(0)}%，${(continuity * 100).toFixed(0)}% 的采样点测到连续纹沟${pastCorner ? '，且延伸过口角水平线' : ''}`,
+      `鼻翼至口角沿线的局部暗度中位数 ${(depth * 100).toFixed(0)}%${
+        hasBaseline ? `，为同脸平颊纹理的 ${ratio.toFixed(1)} 倍` : '（本次未取到平颊基线，只能按绝对值判）'
+      }，${(continuity * 100).toFixed(0)}% 的采样点测到连续纹沟${pastCorner ? '，且延伸过口角水平线' : ''}`,
       deep
         ? pastCorner
           ? '法令深长而过口角，传统称螣蛇入口，主威令虽行而晚景多阻，食禄上须留一分余地'
@@ -482,6 +514,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
           ? '法令浅淡，传统主威令未立、根基尚浅，做事易被人越过'
           : '法令端正，主分寸有度、职事平顺',
       '神相全编',
+      T.nasolabial,
     )
   } else {
     unavailable.push({
