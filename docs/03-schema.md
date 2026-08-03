@@ -321,8 +321,8 @@ addFormats(ajv);   // 需要 ajv-formats 支持 uuid / date-time
   "unavailable": [
     { "id": "face.ear.all", "label": "耳相", "reason": "not_observable",
       "detail": "正面照中双耳被头发遮挡，且面部网格不含耳廓细节点" },
-    { "id": "face.mole", "label": "痣与疤痕", "reason": "out_of_scope",
-      "detail": "本版本未启用皮肤标记检测" }
+    { "id": "face.scar", "label": "疤痕", "reason": "out_of_scope",
+      "detail": "疤痕与痣的像素特征相近，本版本不作区分" }
   ],
   "scorecard": { "气度格局": 4, "才智思辨": 4, "人际情感": 4, "执行意志": 4, "根基福泽": 3 },
   "policy": {

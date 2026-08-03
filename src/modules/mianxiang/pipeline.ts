@@ -17,6 +17,7 @@ import {
 import { toImageData } from '@/core/image'
 import { eulerFromMatrix, type DetectResult } from '@/mediapipe/detect'
 import { COMPLEXION_REGIONS } from './landmarks'
+import { detectMoles, measureEyeBag, measureNasolabial } from './marks'
 import { browDensity, browTailDispersion, computeFaceMetrics } from './metrics'
 import { applyFaceRules } from './rules'
 
@@ -74,6 +75,19 @@ export function buildMianxiangEnvelope({ detection, bitmap, subject }: BuildInpu
     },
   }
 
+  // 痣、卧蚕、法令纹：三项都吃像素，画质太差时干脆不测（rules 会如实标 unavailable）
+  const pixelsUsable = qualityFactor > 0.35
+  const moles = pixelsUsable ? detectMoles(img, landmarks) : null
+  const eyeBags = pixelsUsable
+    ? { left: measureEyeBag(img, landmarks, 'left'), right: measureEyeBag(img, landmarks, 'right') }
+    : null
+  const nasolabial = pixelsUsable
+    ? {
+        left: measureNasolabial(img, landmarks, 'left'),
+        right: measureNasolabial(img, landmarks, 'right'),
+      }
+    : null
+
   const { features, unavailable, derived } = applyFaceRules({
     m,
     qualityFactor,
@@ -82,6 +96,9 @@ export function buildMianxiangEnvelope({ detection, bitmap, subject }: BuildInpu
     complexion,
     browPixels,
     foreheadOccluded,
+    moles,
+    eyeBags,
+    nasolabial,
   })
 
   return {
@@ -116,6 +133,16 @@ export function buildMianxiangEnvelope({ detection, bitmap, subject }: BuildInpu
         下颌角: round(m.contour.gonialAngle, 1),
         对称度: m.symmetryScore,
         田宅: round(m.tianzhai),
+        ...(eyeBags
+          ? { 卧蚕隆起: round(bilat(eyeBags.left.ridge, eyeBags.right.ridge)) }
+          : {}),
+        ...(nasolabial
+          ? {
+              法令纹深: round(bilat(nasolabial.left.depth, nasolabial.right.depth)),
+              法令连续性: round(bilat(nasolabial.left.continuity, nasolabial.right.continuity)),
+            }
+          : {}),
+        ...(moles && !moles.failed ? { 检出痣数: moles.moles.length } : {}),
       },
       ...(complexion
         ? {
@@ -133,6 +160,8 @@ export function buildMianxiangEnvelope({ detection, bitmap, subject }: BuildInpu
     policy: { disclaimerRequired: true, forbidTopics: [...DEFAULT_FORBID_TOPICS] },
   }
 }
+
+const bilat = (l: number, r: number) => (l + r) / 2
 
 /**
  * 额头遮挡检测：比较网格顶端带与额中带的亮度。

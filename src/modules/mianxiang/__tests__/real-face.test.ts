@@ -86,6 +86,9 @@ describe('真人脸 · 规则输出可用', () => {
     complexion: null,
     browPixels: null,
     foreheadOccluded: false,
+    moles: null,
+    eyeBags: null,
+    nasolabial: null,
   })
 
   it('产出足够多的特征', () => {

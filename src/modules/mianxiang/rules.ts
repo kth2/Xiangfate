@@ -25,6 +25,7 @@ import type {
   UnavailableItem,
 } from '@/core/types'
 import type { ComplexionResult } from '@/core/color'
+import type { EyeBagResult, MoleResult, NasolabialResult } from './marks'
 import type { FaceMetrics, Side } from './metrics'
 import { T } from './thresholds'
 
@@ -38,6 +39,12 @@ export interface RuleInput {
   browPixels: Record<Side, { density: number; tailDispersion: number }> | null
   /** 额头是否被头发遮挡 —— 影响上停可信度 */
   foreheadOccluded: boolean
+  /** 痣/斑检测结果，无图像时为 null */
+  moles: MoleResult | null
+  /** 卧蚕/泪堂，左右各一 */
+  eyeBags: Record<Side, EyeBagResult> | null
+  /** 法令纹，左右各一 */
+  nasolabial: Record<Side, NasolabialResult> | null
 }
 
 export interface RuleOutput {
@@ -51,6 +58,7 @@ const bilateral = (l: number, r: number) => (l + r) / 2
 
 export function applyFaceRules(input: RuleInput): RuleOutput {
   const { m, qualityFactor, complexionFactor, detectorScore, complexion, browPixels } = input
+  const { moles, eyeBags, nasolabial } = input
   const drafts: DraftFeature[] = []
   const unavailable: UnavailableItem[] = []
 
@@ -425,14 +433,103 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
     FACE_SHAPE_MEANING[faceShape], '神相全编',
   )
 
+  /* ============ 卧蚕 / 泪堂（男女宫）============ */
+  if (eyeBags) {
+    const ridge = bilateral(eyeBags.left.ridge, eyeBags.right.ridge)
+    const hollow = bilateral(eyeBags.left.hollow, eyeBags.right.hollow)
+    const full = ridge >= T.woCanFull
+    const sunken = !full && hollow >= T.tearTroughHollow
+    push(
+      'face.palace.nannv', '十二宫',
+      full ? '卧蚕丰隆' : sunken ? '泪堂深陷' : '泪堂平顺',
+      full ? 'high' : sunken ? 'low' : 'balanced',
+      round(ridge), 'inferred', conf('shading'),
+      `下睑缘下方亮脊与暗沟的落差为 ${(ridge * 100).toFixed(0)}%，眼下带较颊部暗 ${(hollow * 100).toFixed(0)}%`,
+      full
+        ? '男女宫丰隆，传统主精神足、异性缘厚，子女宫亦佳'
+        : sunken
+          ? '泪堂深陷，传统主男女宫欠佳、心力多耗，情感上易劳神'
+          : '男女宫平顺，情感上无大起落',
+      '柳庄相法',
+    )
+  } else {
+    unavailable.push({
+      id: 'face.palace.nannv', label: '卧蚕（男女宫）', reason: 'low_confidence',
+      detail: '眼下区域采样不足，无法判断卧蚕隆起与泪堂深浅',
+    })
+  }
+
+  /* ============ 法令纹 ============ */
+  if (nasolabial) {
+    const depth = bilateral(nasolabial.left.depth, nasolabial.right.depth)
+    const continuity = bilateral(nasolabial.left.continuity, nasolabial.right.continuity)
+    const pastCorner = nasolabial.left.pastMouthCorner && nasolabial.right.pastMouthCorner
+    // 只深不连多半是鼻侧阴影，两项都过线才认
+    const deep = depth >= T.nasolabialDeep && continuity >= T.nasolabialContinuity
+    const faint = depth < T.nasolabialFaint || continuity < 0.3
+    const nBand = toBand(depth, T.nasolabial)
+
+    push(
+      'face.nasolabial', '纹痣',
+      deep ? (pastCorner ? '法令过口' : '法令深长') : faint ? '法令浅淡' : '法令端正',
+      nBand, round(depth), 'inferred', conf('shading'),
+      `鼻翼至口角沿线的局部暗度中位数 ${(depth * 100).toFixed(0)}%，${(continuity * 100).toFixed(0)}% 的采样点测到连续纹沟${pastCorner ? '，且延伸过口角水平线' : ''}`,
+      deep
+        ? pastCorner
+          ? '法令深长而过口角，传统称螣蛇入口，主威令虽行而晚景多阻，食禄上须留一分余地'
+          : '法令深长，传统主威权已立、令行禁止，中晚年主事之相'
+        : faint
+          ? '法令浅淡，传统主威令未立、根基尚浅，做事易被人越过'
+          : '法令端正，主分寸有度、职事平顺',
+      '神相全编',
+    )
+  } else {
+    unavailable.push({
+      id: 'face.nasolabial', label: '法令纹', reason: 'low_confidence',
+      detail: '鼻翼至口角区域采样不足，无法判断法令深浅',
+    })
+  }
+
+  /* ============ 痣 ============ */
+  if (moles && !moles.failed) {
+    const solid = moles.moles.filter((mo) => mo.contrast >= T.moleContrast)
+    if (solid.length) {
+      const positions = solid.map((mo) => mo.position)
+      push(
+        'face.mole', '纹痣', `${positions.join('、')}见痣`, 'categorical',
+        positions.join('、'), 'inferred', conf('density'),
+        solid
+          .map((mo) => `${mo.position}（直径约 IOD 的 ${(mo.sizeRatio * 100).toFixed(1)}%，较周围肤色暗 ${(mo.contrast * 100).toFixed(0)}%）`)
+          .join('；'),
+        solid.map((mo) => MOLE_MEANING[mo.position]).join('；'),
+        '麻衣神相',
+      )
+    } else {
+      push(
+        'face.mole', '纹痣', '面上无显痣', 'balanced', 0, 'inferred', conf('density'),
+        '面部皮肤区域未检出足够明显的深色斑点',
+        '面无显痣，传统视为气色不受遮挡，各宫论断以本形为准',
+        '麻衣神相',
+      )
+    }
+  } else {
+    unavailable.push({
+      id: 'face.mole', label: '痣', reason: 'low_confidence',
+      detail:
+        moles?.failed === 'too_noisy'
+          ? '面部检出过多深色斑点，多为雀斑、痘印或画质噪点，无法可靠区分出痣，本次不作判断'
+          : '图像分辨率或采样区域不足，无法可靠检出痣',
+    })
+  }
+
   /* ============ 不可观测项 ============ */
   unavailable.push({
     id: 'face.ear', label: '耳相', reason: 'not_observable',
     detail: '正面照中双耳常被头发遮挡，且面部网格不含耳廓细节点，无法测量耳形与耳位',
   })
   unavailable.push({
-    id: 'face.mole', label: '痣与疤痕', reason: 'out_of_scope',
-    detail: '本版本未启用皮肤标记检测',
+    id: 'face.scar', label: '疤痕', reason: 'out_of_scope',
+    detail: '疤痕与痣的像素特征相近，本版本不作区分，故不单独判定',
   })
 
   const { features, unavailable: lowConf } = partitionByConfidence(drafts)
@@ -525,6 +622,30 @@ const FIVE_MEANING: Record<FiveElement | '兼形', string> = {
   火: '热情积极，行动力强；性急气盛，事到临头难耐',
   土: '稳重踏实，重承诺积累；失之则迟钝守旧，少变通',
   兼形: '兼具多形，可塑性强；然形不纯，气亦驳杂，主一生起落多端',
+}
+
+/**
+ * 痣按宫位断，这是传统相法里断语最密的一块。
+ * 与其他文案一样按原意写 —— 该说「多阻」就说「多阻」。
+ */
+const MOLE_MEANING: Record<import('./marks').MolePosition, string> = {
+  印堂: '印堂见痣，传统主运途多阻、心事难解，三十前后尤须自持',
+  额中: '额上见痣，传统主早年离祖、少得亲荫，凡事靠自己开局',
+  额角: '迁移宫见痣，传统主奔波在外、居处多迁',
+  眉: '眉中藏痣，传统称草里藏珠，主聪敏而有偏才，然兄弟之间易生嫌隙',
+  眼尾: '奸门见痣，传统主感情多波折、外缘纷扰，情事上难得清静',
+  眼下: '男女宫见痣，传统主为子女情事操心，泪堂有痣者心多牵挂',
+  山根: '山根见痣，传统主中年一道坎，事业须防中途生变',
+  鼻梁: '年寿见痣，传统主中年运滞、财路易断，宜守不宜进',
+  准头: '准头见痣，传统主财帛易散、进多出亦多',
+  鼻翼: '财库见痣，传统主守财不易，钱财上须防漏',
+  颧: '颧上见痣，传统主权柄受挫、是非缠身，与人争位易招怨',
+  人中: '人中见痣，传统主子息之事多操心，家中之事不由己',
+  唇周: '口边见痣，传统主口福，亦主口舌是非，言多必失',
+  法令: '法令见痣，传统主威令受阻、职事上多掣肘',
+  地阁: '地阁见痣，传统主居所多迁、晚运奔波，田宅不易久守',
+  腮: '腮上见痣，传统主性执而记怨，与下属部属之间易生龃龉',
+  面颊: '颊上见痣，传统主人事纷扰，与人相处须留余地',
 }
 
 const FACE_SHAPE_MEANING: Record<FaceShape, string> = {

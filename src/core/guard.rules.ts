@@ -89,6 +89,7 @@ export const WORD_LISTS: [GuardCategory, string[]][] = [
 /** 报告必须包含且仅包含这些二级标题，顺序固定 */
 export const REQUIRED_SECTIONS = [
   '特征识别',
+  '断语',
   '性格特质',
   '能力倾向',
   '运势倾向',

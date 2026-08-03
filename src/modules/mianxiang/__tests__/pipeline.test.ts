@@ -14,75 +14,10 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
 import Ajv from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
-import type { P3 } from '@/core/geom'
 import { computeFaceMetrics } from '../metrics'
 import { applyFaceRules } from '../rules'
 import { computeScorecard } from '@/core/scorecard'
-import { EYE, IRIS } from '../landmarks'
-
-const fixture = JSON.parse(
-  readFileSync(
-    fileURLToPath(new URL('../../../../tests/fixtures/canonical-face-model.json', import.meta.url)),
-    'utf8',
-  ),
-) as { vertices: [number, number, number][] }
-
-const IMG_W = 1080
-const IMG_H = 1440
-
-/**
- * 规范模型（y 向上、单位约 cm）→ 归一化图像坐标（y 向下、0–1）。
- * 等比缩放后居中，模拟一张正对镜头、无透视畸变的照片。
- */
-function projectCanonical(): P3[] {
-  const V = fixture.vertices
-  const xs = V.map((v) => v[0])
-  const ys = V.map((v) => v[1])
-  const spanX = Math.max(...xs) - Math.min(...xs)
-  const spanY = Math.max(...ys) - Math.min(...ys)
-
-  // 让脸高占画面 70%
-  const scalePx = (IMG_H * 0.7) / spanY
-  const cx = (Math.min(...xs) + Math.max(...xs)) / 2
-  const cy = (Math.min(...ys) + Math.max(...ys)) / 2
-
-  const pts: P3[] = V.map(([x, y, z]) => ({
-    x: 0.5 + ((x - cx) * scalePx) / IMG_W,
-    // y 翻转：模型向上为正，图像向下为正
-    y: 0.5 - ((y - cy) * scalePx) / IMG_H,
-    // z 与 x 同尺度，且 MediaPipe 约定越靠近镜头越小 → 取负
-    z: (-z * scalePx) / IMG_W,
-  }))
-
-  void spanX
-  // 规范模型只有 468 点；虹膜 468–477 由 attention 模型另出，这里合成
-  const synthIris = (side: 'left' | 'right') => {
-    const E = EYE[side]
-    const cxE = (pts[E.inner].x + pts[E.outer].x) / 2
-    const cyE = (pts[E.upper].y + pts[E.lower].y) / 2
-    const zE = (pts[E.inner].z + pts[E.outer].z) / 2
-    // 虹膜半径约为眼宽的 22%
-    const r = Math.hypot(pts[E.outer].x - pts[E.inner].x, pts[E.outer].y - pts[E.inner].y) * 0.22
-    return {
-      center: { x: cxE, y: cyE, z: zE },
-      ring: [
-        { x: cxE, y: cyE - r * (IMG_W / IMG_H), z: zE },
-        { x: cxE + r, y: cyE, z: zE },
-        { x: cxE, y: cyE + r * (IMG_W / IMG_H), z: zE },
-        { x: cxE - r, y: cyE, z: zE },
-      ],
-    }
-  }
-
-  const out = [...pts]
-  const R = synthIris('right')
-  const L = synthIris('left')
-  out[IRIS.right.center] = R.center
-  IRIS.right.ring.forEach((i, k) => (out[i] = R.ring[k]))
-  out[IRIS.left.center] = L.center
-  IRIS.left.ring.forEach((i, k) => (out[i] = L.ring[k]))
-  return out
-}
+import { IMG_H, IMG_W, projectCanonical } from './canonical'
 
 const LM = projectCanonical()
 const M = computeFaceMetrics(LM, IMG_W, IMG_H)
@@ -159,6 +94,9 @@ describe('规则映射', () => {
     complexion: null,
     browPixels: null,
     foreheadOccluded: false,
+    moles: null,
+    eyeBags: null,
+    nasolabial: null,
   })
 
   it('产出了成规模的特征集', () => {
@@ -238,6 +176,9 @@ describe('产出的 envelope 符合 JSON Schema', () => {
       complexion: null,
       browPixels: null,
       foreheadOccluded: false,
+      moles: null,
+      eyeBags: null,
+      nasolabial: null,
     })
 
     const env = {
