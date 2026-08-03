@@ -5,6 +5,7 @@
 
 import { ANSWER_STRUCTURE, detectTopics, TOPIC_GUIDES, TYPE_QA_NOTES } from '@/core/qa'
 import { explainScorecard } from '@/core/scorecard'
+import { verdictBlock } from '@/core/verdicts'
 import { SCORE_DIMENSIONS, type AnalysisEnvelope, type AnalysisType } from '@/core/types'
 
 const HEAD: Record<AnalysisType, string> = {
@@ -163,12 +164,14 @@ export function buildUserPrompt(env: AnalysisEnvelope): string {
 【结构化特征数据】
 ${JSON.stringify(trimEnvelope(env), null, 1)}
 
+${verdictBlock(env.features, env.analysisType)}
+
 ${scorecardBlock(env)}
 
 【用户关注方向】
 ${topics.length ? topics.join('、') : '（未指定，请按标准结构均衡展开。）'}
 
-请严格按 System 中定义的六段式输出。`
+请严格按 System 中定义的七段式输出。`
 }
 
 export interface FollowUpOptions {
@@ -199,7 +202,7 @@ ${opts.majorDecision ? MAJOR_DECISION_NOTE : ''}
 1. 仍然只能基于上面那份特征数据立论。若问题涉及的特征不在数据中，
    或位于 unavailable 列表，请直接说明「这一点本次测量没有覆盖」，
    并说明需要什么条件才能测到（例如「需要补一张侧面照」）。
-2. 不要重复输出六段式报告结构。直接针对问题作答。
+2. 不要重复输出七段式报告结构。直接针对问题作答。
 3. 长度 200–500 字，用自然段，最多用一个小列表。
 4. System 中的所有禁止事项继续有效，尤其是：
    不预测具体事件与时间、不作疾病诊断、不作寿夭判断。

@@ -126,6 +126,26 @@ export const T = {
   /** 田宅宫：眉眼间距 ÷ 单眼宽。规范脸 0.498 */
   tianzhai: around(0.498, 0.12, 0.25),
 
+  /**
+   * 卧蚕 / 泪堂（男女宫）。明暗起伏推断，受光照方向影响大，CALIBRATE
+   * ridge：亮脊与其下暗沟的落差；hollow：眼下带比颊部暗多少
+   */
+  woCanRidge: { veryLo: 0.05, lo: 0.09, hi: 0.17, veryHi: 0.24 } satisfies BandSpec,
+  woCanFull: 0.17,
+  tearTroughHollow: 0.14,
+
+  /**
+   * 法令纹。depth 是沿线局部暗度的中位数，continuity 是测得到纹沟的采样点占比。
+   * 两者都过线才算「法令深长」—— 只深不连多半是鼻侧阴影，CALIBRATE
+   */
+  nasolabial: { veryLo: 0.04, lo: 0.07, hi: 0.13, veryHi: 0.19 } satisfies BandSpec,
+  nasolabialDeep: 0.13,
+  nasolabialFaint: 0.07,
+  nasolabialContinuity: 0.5,
+
+  /** 痣：相对周围肤色的暗度落差，低于此值不认为是痣。CALIBRATE */
+  moleContrast: 0.16,
+
   /** 气色。像素类指标，CALIBRATE */
   complexion: {
     ruddy: 0.5,

@@ -3,7 +3,7 @@
  *
  * 选题原则：
  *   · 都是求测者真的会问的（知识库里的「最常问」），不是我们希望他们问的；
- *   · 每一条都必须落在本次能测到的特征上 —— 不放「痣长在哪好」这种测不到的；
+ *   · 每一条都必须落在本次能测到的特征上（痣、卧蚕、法令纹已可测，见 modules/mianxiang/marks.ts）；
  *   · 都不触碰寿夭、婚姻成败、子女、具体时间（那些即使问了也只会得到「不作论断」）。
  * 新增条目需同时通过 core/__tests__/qa.test.ts 里的前置检查用例。
  */
@@ -25,6 +25,7 @@ export const PRESET_QUESTIONS: Record<AnalysisType, PresetQuestion[]> = {
     { id: 'mian-career', text: '事业上适合什么方向？', topic: 'career' },
     { id: 'mian-relation', text: '与人相处上要注意什么？', topic: 'relationship' },
     { id: 'mian-color', text: '近期气色透露出什么状态？', topic: 'health' },
+    { id: 'mian-marks', text: '面上的痣与法令纹传统怎么看？', topic: 'overall' },
     { id: 'mian-personality', text: '性格上别人可能怎么看我？', topic: 'personality' },
   ],
 

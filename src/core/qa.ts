@@ -129,7 +129,7 @@ export function detectTopics(question: string): QaTopic[] {
   return TOPIC_ORDER.filter((t) => TOPIC_GUIDES[t].keywords.some((k) => q.includes(k)))
 }
 
-/** 追问回答的结构（知识库第 5 节）。报告的六段式不适用于追问 */
+/** 追问回答的结构（知识库第 5 节）。报告的七段式不适用于追问 */
 export const ANSWER_STRUCTURE = [
   '对应特征：本次实测到的相关指标 1–3 条，带传统术语与关键数值',
   '传统说法：这些特征在相书里主什么，1–2 句',
@@ -140,7 +140,7 @@ export const ANSWER_STRUCTURE = [
 /** 四类各自的应答提醒。均来自知识库对应章节的「本项目的边界」 */
 export const TYPE_QA_NOTES: Record<AnalysisType, string[]> = {
   mianxiang: [
-    '痣与法令纹不在本次特征库内，被问到时如实说「本次测量没有覆盖」，不要用「一般来说」补足。',
+    '痣、卧蚕、法令纹是像素推断出来的，措辞要带上「推估」；本次没检出时如实说没检出，不要用「一般来说」补足。',
     '气色只说明当下状态，关联作息与精力，不指向任何身体问题。',
     '上停取自面部网格顶端而非真实发际线，谈到额头与早年时措辞要相应缓和。',
   ],

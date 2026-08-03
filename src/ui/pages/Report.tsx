@@ -12,6 +12,7 @@ import type { AnalysisEnvelope } from '@/core/types'
 import { Markdown } from '../components/Markdown'
 import { ScoreCardView } from '../components/ScoreCard'
 import { FeatureList } from '../components/FeatureList'
+import { VerdictList } from '../components/VerdictList'
 
 type Stage = 'idle' | 'streaming' | 'regenerating' | 'done' | 'error'
 
@@ -221,6 +222,8 @@ export function Report() {
           features={envelope.features}
           accent={accent}
         />
+
+        <VerdictList features={envelope.features} accent={accent} />
 
         <FeatureList
           features={envelope.features}

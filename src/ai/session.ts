@@ -141,7 +141,7 @@ export class AnalysisSession {
       yield { delta: d }
     }
 
-    // 追问不检查六段式结构，只做内容过滤
+    // 追问不检查七段式结构，只做内容过滤
     const filtered = filterFollowUp(raw, this.envelope)
     this.history.push({ role: 'user', content: question }, { role: 'assistant', content: filtered.text })
 
@@ -177,7 +177,7 @@ export class CrisisInterrupt extends Error {
   }
 }
 
-/** 追问的过滤：复用逐句扫描，但不要求六段式结构 */
+/** 追问的过滤：复用逐句扫描，但不要求七段式结构 */
 function filterFollowUp(raw: string, env: AnalysisEnvelope): { text: string; hits: GuardHit[] } {
   // 包一层假的结构，跑完整 finalize 后再剥掉 —— 避免重复实现逐句逻辑
   const wrapped = `## 特征识别\n${raw.trim()}`
@@ -192,7 +192,7 @@ function describeHit(h: GuardHit): string {
       return h.token.startsWith('缺少')
         ? `${h.token}，六个二级标题必须齐全且顺序固定`
         : h.token.startsWith('过短')
-          ? '全文过短，请按各段字数要求展开到 1000–1500 字'
+          ? '全文过短，请按各段字数要求展开到 1100–1700 字'
           : h.token.startsWith('过长')
             ? '全文过长，请压缩到 1500 字以内'
             : `${h.token}，不要写白名单以外的小节`
