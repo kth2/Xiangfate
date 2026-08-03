@@ -5,8 +5,10 @@
 
 import {
   AIError,
+  CONNECT_TIMEOUT_MS,
   mapHttpError,
   sseLines,
+  withTimeout,
   type AIProvider,
   type ChatMessage,
   type GenerateOptions,
@@ -51,6 +53,8 @@ export function createGeminiProvider(
         },
       }
 
+      // 首字节超时：连不上 / 服务端不响应时不能无限等
+      const t = withTimeout(opts.signal, CONNECT_TIMEOUT_MS)
       let res: Response
       try {
         res = await fetch(
@@ -59,14 +63,18 @@ export function createGeminiProvider(
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
             body: JSON.stringify(body),
-            signal: opts.signal,
+            signal: t.signal,
           },
         )
       } catch (e) {
+        t.cleanup()
+        if (t.timedOut()) throw new AIError('network', 'Gemini 一直没有响应，超时了')
         if (e instanceof Error && e.name === 'AbortError') throw e
         throw new AIError('network', '连不上 Gemini 服务')
       }
 
+      // 响应头已到，首字节计时到此为止；之后由 sseLines 的停顿看门狗接管
+      t.cleanup()
       if (!res.ok) throw mapHttpError(res.status, await res.text().catch(() => ''))
 
       let emitted = false

@@ -37,6 +37,10 @@ export function Report() {
   const [asking, setAsking] = useState(false)
   const [pending, setPending] = useState('')
   const [showCare, setShowCare] = useState(false)
+  // 追问的错误必须单独存：报告正文那块只在 stage === 'error' 时才渲染 error，
+  // 而追问失败时 stage 一直是 'done' —— 于是错误被设进 state 却永远显示不出来，
+  // 用户看到的就是「点了没反应」。
+  const [askError, setAskError] = useState<string | null>(null)
   const [recordId, setRecordId] = useState<string | null>(id ?? null)
 
   const sessionRef = useRef<AnalysisSession | null>(null)
@@ -141,9 +145,11 @@ export function Report() {
         sessionRef.current = new AnalysisSession(
           createProvider(providerId, cfg.apiKey, cfg.model, cfg.baseUrl),
           envelope,
+          // 带上已有的报告与问答，否则重建出来的会话没有上下文
+          { report, followUps },
         )
       } catch (err) {
-        setError(err instanceof Error ? err.message : '还没配置 API Key')
+        setAskError(err instanceof Error ? err.message : '还没配置 API Key')
         return
       }
     }
@@ -154,6 +160,7 @@ export function Report() {
     setAsking(true)
     setPending('')
     setShowCare(false)
+    setAskError(null)
 
     const ac = new AbortController()
     abortRef.current = ac
@@ -172,7 +179,7 @@ export function Report() {
         // 这一轮刻意不发给 AI
         setShowCare(true)
       } else if (!(err instanceof Error && err.name === 'AbortError')) {
-        setError(friendlyError(err))
+        setAskError(friendlyError(err))
       }
       setPending('')
     } finally {
@@ -333,6 +340,22 @@ export function Report() {
               </div>
             )}
 
+            {askError && (
+              <div
+                className="mb-4 border-l-2 py-2 pl-3"
+                style={{ borderColor: 'var(--color-cinnabar-500)' }}
+              >
+                <p className="text-[12px] leading-relaxed text-muted">{askError}</p>
+                <button
+                  type="button"
+                  onClick={() => setAskError(null)}
+                  className="mt-1.5 text-[11px] text-subtle underline"
+                >
+                  知道了
+                </button>
+              </div>
+            )}
+
             <form onSubmit={onAsk} className="flex gap-2">
               <input
                 value={question}
@@ -342,13 +365,24 @@ export function Report() {
                 className="min-w-0 flex-1 border bg-transparent px-3 py-2.5 text-[13px] outline-none"
                 style={{ borderColor: 'var(--line)', borderRadius: 2 }}
               />
-              <button
-                type="submit"
-                disabled={asking || !question.trim()}
-                className="btn-seal shrink-0 px-5 text-[14px]"
-              >
-                {asking ? '…' : '问'}
-              </button>
+              {asking ? (
+                // 卡住时得有路可退 —— 不能只留一个转圈的按钮
+                <button
+                  type="button"
+                  onClick={() => abortRef.current?.abort()}
+                  className="btn-outline shrink-0 px-5 text-[14px]"
+                >
+                  停
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!question.trim()}
+                  className="btn-seal shrink-0 px-5 text-[14px]"
+                >
+                  问
+                </button>
+              )}
             </form>
           </section>
         )}
