@@ -3,25 +3,23 @@
  *
  * 这是**唯一一道不依赖模型配合**的防线 —— Prompt 可能被绕过、被忽略、
  * 被模型的训练倾向压过，但这里是确定性的字符串匹配。
+ *
+ * ⚠️ 边界已按产品决定收窄（见 docs/07 第一节）：
+ * 传统相书里的性格论断 —— 心机深、城府深、薄情寡义、六亲缘薄、性情急躁、
+ * 忌相之类 —— **不再拦截**，这是本 App 要呈现的东西。
+ * 这里只留四类硬边界：疾病诊断、寿夭生死、性别化的婚配归咎、身材与残障贬损，
+ * 外加与内容无关的技术项（时间预测、字段名泄漏、不可观测项）。
  */
 
-/** 绝对化断言。命中 → 触发一次重生成，再犯则删句 */
-export const BANNED_ABSOLUTE = [
-  '必定', '一定会', '肯定会', '注定', '必有', '绝对', '无疑', '势必', '终将',
-  '逃不过', '命中注定', '铁定', '难逃', '毫无疑问',
-]
-
-/** 寿夭与重大人生断言。命中 → 直接删句，不重生成（避免二次风险） */
+/**
+ * 寿夭生死 + 性别化的婚配归咎。命中 → 直接删句，不重生成。
+ *
+ * 「克夫」「绝后」这类不是性格论断，而是把他人的祸福算在此人头上，
+ * 传统上又几乎只用于女性 —— 与放开性格论断是两件事，仍然拦。
+ */
 export const BANNED_FATE = [
   '短命', '长寿之相', '夭折', '寿元', '阳寿', '大限', '死于', '活不过', '早夭',
-  '克夫', '克妻', '克子', '丧偶', '离异之相', '孤独终老', '绝后', '难产',
-  '不得善终', '血光之灾', '牢狱之灾',
-]
-
-/** 人格污名 */
-export const BANNED_STIGMA = [
-  '心术不正', '薄情', '寡义', '阴险', '狡诈', '奸猾', '小人相', '凶相',
-  '刻薄相', '低贱', '愚钝', '没出息', '不知廉耻', '奸邪', '歹毒',
+  '克夫', '克妻', '克子', '丧偶', '绝后', '难产',
 ]
 
 /** 疾病与医疗断言 */
@@ -53,9 +51,7 @@ export const BANNED_JARGON = [
 ]
 
 export type GuardCategory =
-  | 'absolute'
   | 'fate'
-  | 'stigma'
   | 'medical'
   | 'discrimination'
   | 'gendered'
@@ -64,12 +60,16 @@ export type GuardCategory =
   | 'unavailable_leak'
   | 'structure'
 
-/** 命中后的处置方式 */
+/**
+ * 命中后的处置方式。
+ *
+ * 只剩 structure 会触发重生成 —— 措辞类的重生成已经全部取消：
+ * 原来的 absolute（必定/注定/命中注定）与 stigma（心术不正/薄情/狡诈……）
+ * 两类词表已整体删除，传统断语的口气不再是问题。
+ */
 export const CATEGORY_ACTION: Record<GuardCategory, 'regenerate' | 'strip'> = {
-  absolute: 'regenerate',
   structure: 'regenerate',
   fate: 'strip',
-  stigma: 'strip',
   medical: 'strip',
   discrimination: 'strip',
   gendered: 'strip',
@@ -79,9 +79,7 @@ export const CATEGORY_ACTION: Record<GuardCategory, 'regenerate' | 'strip'> = {
 }
 
 export const WORD_LISTS: [GuardCategory, string[]][] = [
-  ['absolute', BANNED_ABSOLUTE],
   ['fate', BANNED_FATE],
-  ['stigma', BANNED_STIGMA],
   ['medical', BANNED_MEDICAL],
   ['discrimination', BANNED_DISCRIMINATION],
   ['gendered', BANNED_GENDERED],

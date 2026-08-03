@@ -7,11 +7,9 @@
  * 并由 System Prompt 硬性禁止 AI 发言。宁可少说，不可编造。
  *
  * 内容策略（docs/07）：
- * · 「骨贵肉贱」的价值排序已改为中性表述
- * · 颧骨「左高右低→易冲动」改为中性的行动倾向描述
- * · 枕骨扁平「晚年孤独」、骨多肉少「晚年孤苦」等消极预言已删
- * · 反骨「叛逆…可能反叛」、脑后见腮「心机重」等污名已改写
- * · 鸡胸、脊椎侧弯、驼背的人格评价已删，只保留体态提示
+ * · 骨的清浊、孤峭、劳碌、少断等传统断语照原意写，不作好听的改写
+ * · 仍不写的只有四类：疾病指向、寿夭生死、性别化的婚配归咎、身材与残障贬损
+ * · 鸡胸、脊椎侧弯、驼背是医学状况，不据以论人格，只保留体态提示
  */
 
 import {
@@ -70,10 +68,10 @@ export function applyBoneRules(input: BoneRuleInput): BoneRuleOutput {
     zpBand, round(m.zygoProminence), 'inferred', conf('shading'),
     `颧点相对鼻根与太阳穴基准的深度突出量归一化后为 ${m.zygoProminence.toFixed(2)}，颧宽为 IOD 的 ${(m.zygoWidth * 100).toFixed(0)}%`,
     zpBand === 'high' || zpBand === 'very_high'
-      ? '主见强，推动力与领导意愿突出'
+      ? '权骨隆起，主见强、推动力足；过显则性刚气盛，好压人一头'
       : zpBand === 'balanced'
         ? '性格平衡，处事稳重'
-        : '配合度高，善于协作，不争一时之先',
+        : '颧低无势，传统主无权柄、居人之下，遇事难自主',
     '太清神鉴',
   )
 
@@ -84,7 +82,7 @@ export function applyBoneRules(input: BoneRuleInput): BoneRuleOutput {
     round(m.zygoEdge), 'inferred', conf('contour'),
     `颧至颌轮廓的灰度梯度强度归一化后为 ${m.zygoEdge.toFixed(2)}（越高轮廓越锐）`,
     m.zygoEdge >= T.zygoEdgeSharp
-      ? '原则性强，界限分明，沟通时可多一分柔和'
+      ? '骨露少肉，传统主性情孤峭、待人少回旋，六亲亦疏'
       : m.zygoEdge <= T.zygoEdgeSoft
         ? '外柔内刚，善于协调，不锋芒毕露'
         : '刚柔有度，进退得宜',
@@ -147,11 +145,11 @@ export function applyBoneRules(input: BoneRuleInput): BoneRuleOutput {
     round(m.jawRatio), 'measured', conf('geometry'),
     `颌宽为颧宽的 ${(m.jawRatio * 100).toFixed(0)}%，下颌角 ${m.gonialAngle.toFixed(0)}°，下巴曲率半径 ${m.chinRadius.toFixed(2)}`,
     square
-      ? '意志坚定，行动力强，认准的事能扛到底'
+      ? '意志坚定，行动力强，认准的事能扛到底；性亦刚硬，少肯低头'
       : narrow
-        ? '敏感细腻，审美佳；可有意识地增强一点耐受与坚持'
+        ? '下颌尖小，传统主意志薄弱、临事易妥协，晚运根基不厚'
         : chinShape === '圆'
-          ? '温和友善，善解人意'
+          ? '温和友善，善解人意；然失于耳软，主意常由他人'
           : '进退有据，柔中带刚',
     '太清神鉴',
   )
@@ -195,8 +193,8 @@ export function applyBoneRules(input: BoneRuleInput): BoneRuleOutput {
     bfLabel === '骨肉相称'
       ? '刚柔并济，平衡发展 —— 传统骨相视此为最佳状态'
       : bfLabel === '骨多肉少'
-        ? '刚毅坚强，原则性高；多一分包容与柔和会更从容'
-        : '温和友善，人缘佳；在需要决断的场合可以更果决一些',
+        ? '刚毅坚强，原则性高；传统亦主一生劳碌，性孤而少亲'
+        : '温和友善，人缘佳；传统亦主意志偏缓、临事少断，安逸而少进取',
     '太清神鉴',
   )
 

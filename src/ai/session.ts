@@ -188,8 +188,6 @@ function filterFollowUp(raw: string, env: AnalysisEnvelope): { text: string; hit
 
 function describeHit(h: GuardHit): string {
   switch (h.category) {
-    case 'absolute':
-      return `出现了绝对化措辞「${h.token}」，请改用「传统相法认为……」这类概率化表达`
     case 'structure':
       return h.token.startsWith('缺少')
         ? `${h.token}，六个二级标题必须齐全且顺序固定`
