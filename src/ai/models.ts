@@ -18,6 +18,8 @@ export interface ModelInfo {
   contextLength: number | null
   /** 是否免费 */
   free: boolean
+  /** 推理型模型 —— 在本应用里容易把额度耗在思考过程上，正文反而写不出来 */
+  reasoning?: boolean
   /** 附加说明，如价格 */
   note?: string
 }
@@ -246,6 +248,7 @@ async function fetchOpenRouterModels(opts: FetchOptions): Promise<ModelInfo[]> {
       context_length?: number
       pricing?: { prompt?: string; completion?: string }
       architecture?: { input_modalities?: string[]; modality?: string }
+      supported_parameters?: string[]
     }[]
   }
 
@@ -262,16 +265,29 @@ async function fetchOpenRouterModels(opts: FetchOptions): Promise<ModelInfo[]> {
     const completionPrice = Number(m.pricing?.completion ?? '1')
     const free = m.id.endsWith(':free') || (promptPrice === 0 && completionPrice === 0)
 
+    /*
+     * 推理型模型在这个场景里很不划算：它们先把额度花在「想」上，
+     * 正文往往还没开始写就被截断 —— 表现出来就是「模型没有返回内容」。
+     * 字段取不到时这里什么也不做，退化成原来的行为。
+     */
+    const reasoning = (m.supported_parameters ?? []).some((p) =>
+      p === 'reasoning' || p === 'include_reasoning',
+    )
+
+    const price =
+      !free && Number.isFinite(promptPrice) && promptPrice > 0
+        ? `$${(promptPrice * 1_000_000).toFixed(2)}/M tokens`
+        : undefined
+
     out.push({
       id: m.id,
       label: m.name || m.id,
       contextLength: m.context_length ?? null,
       free,
-      note: free
-        ? undefined
-        : Number.isFinite(promptPrice) && promptPrice > 0
-          ? `$${(promptPrice * 1_000_000).toFixed(2)}/M tokens`
-          : undefined,
+      reasoning,
+      note: [price, reasoning ? '推理型 · 易只输出思考过程' : undefined]
+        .filter(Boolean)
+        .join(' · ') || undefined,
     })
   }
 

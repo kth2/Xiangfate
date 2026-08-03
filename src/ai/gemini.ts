@@ -78,6 +78,7 @@ export function createGeminiProvider(
       if (!res.ok) throw mapHttpError(res.status, await res.text().catch(() => ''))
 
       let emitted = false
+      let finishReason: string | undefined
       for await (const data of sseLines(res, opts.signal)) {
         if (!data || data === '[DONE]') continue
         let chunk: GeminiChunk
@@ -89,6 +90,7 @@ export function createGeminiProvider(
         if (chunk.promptFeedback?.blockReason) {
           throw new AIError('refused', `请求被拦截（${chunk.promptFeedback.blockReason}）`)
         }
+        if (chunk.candidates?.[0]?.finishReason) finishReason = chunk.candidates[0].finishReason
         const text = chunk.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? ''
         if (text) {
           emitted = true
@@ -96,7 +98,22 @@ export function createGeminiProvider(
         }
       }
 
-      if (!emitted) throw new AIError('refused', '模型没有返回内容')
+      // 空输出也有具体原因，说出来才有得改
+      if (!emitted) {
+        if (finishReason === 'MAX_TOKENS') {
+          throw new AIError('refused', '输出长度上限太小，模型还没说到正文就被截断了')
+        }
+        if (finishReason === 'SAFETY' || finishReason === 'PROHIBITED_CONTENT') {
+          throw new AIError('refused', 'Gemini 的安全过滤拦下了这次输出，换个问法试试')
+        }
+        if (finishReason === 'RECITATION') {
+          throw new AIError('refused', '输出被判定为复述受版权保护的内容，换个问法试试')
+        }
+        throw new AIError(
+          'refused',
+          `${model} 这次没有返回内容${finishReason ? `（结束原因：${finishReason}）` : ''}`,
+        )
+      }
     },
   }
 }
