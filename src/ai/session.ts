@@ -5,7 +5,13 @@
  * 不存在「忘了跑 guard」的可能。
  */
 
-import { finalizeReport, guardReport, preflightQuestion, type GuardHit } from '@/core/guard'
+import {
+  filterSentences,
+  finalizeReport,
+  guardReport,
+  preflightQuestion,
+  type GuardHit,
+} from '@/core/guard'
 import type { AnalysisEnvelope } from '@/core/types'
 import { correctionNote, SYSTEM_PROMPT } from '@/prompts/system'
 import { buildFollowUpPrompt, buildUserPrompt, summarizeReport } from '@/prompts/user'
@@ -42,6 +48,12 @@ export interface StreamEvent {
 /** 从第 4 轮起把首份报告压成摘要，控制上下文 */
 const SUMMARIZE_AFTER_TURN = 3
 
+/** 从历史记录恢复会话时要带上的东西 */
+export interface ResumeState {
+  report: string
+  followUps: { question: string; answer: string }[]
+}
+
 export class AnalysisSession {
   private readonly provider: AIProvider
   private readonly envelope: AnalysisEnvelope
@@ -49,9 +61,33 @@ export class AnalysisSession {
   private report = ''
   private turn = 0
 
-  constructor(provider: AIProvider, envelope: AnalysisEnvelope) {
+  /**
+   * @param resume 从往迹页打开旧报告再追问时传入。
+   *
+   * 不传会怎样 —— 早先就是不传：history 是空的，于是追问只发出去一条孤零零的
+   * user 消息，既没有 System Prompt 也没有特征数据，而追问模板里还写着
+   * 「仍然只能基于上面那份特征数据立论」。第 4 轮起更糟：
+   * buildFollowUpContext 会解构空数组，firstAssistant 是 undefined，直接抛错。
+   */
+  constructor(provider: AIProvider, envelope: AnalysisEnvelope, resume?: ResumeState) {
     this.provider = provider
     this.envelope = envelope
+
+    if (resume) {
+      this.report = resume.report
+      this.history = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: buildUserPrompt(envelope) },
+        { role: 'assistant', content: resume.report },
+      ]
+      for (const f of resume.followUps) {
+        this.history.push(
+          { role: 'user', content: f.question },
+          { role: 'assistant', content: f.answer },
+        )
+      }
+      this.turn = resume.followUps.length
+    }
   }
 
   get reportText(): string {
@@ -154,7 +190,8 @@ export class AnalysisSession {
       majorDecision,
     })
 
-    if (this.turn <= SUMMARIZE_AFTER_TURN) {
+    // history 不足三条（没跑过报告、也没 resume）时不能走摘要分支 —— 会解构出 undefined
+    if (this.turn <= SUMMARIZE_AFTER_TURN || this.history.length < 3) {
       return [...this.history, { role: 'user', content: followUp }]
     }
 
@@ -177,13 +214,10 @@ export class CrisisInterrupt extends Error {
   }
 }
 
-/** 追问的过滤：复用逐句扫描，但不要求七段式结构 */
+/** 追问的过滤：只做逐句内容扫描，不套报告结构，也不补空节 */
 function filterFollowUp(raw: string, env: AnalysisEnvelope): { text: string; hits: GuardHit[] } {
-  // 包一层假的结构，跑完整 finalize 后再剥掉 —— 避免重复实现逐句逻辑
-  const wrapped = `## 特征识别\n${raw.trim()}`
-  const r = finalizeReport(wrapped, env.unavailable)
-  const text = r.text.replace(/^##\s+特征识别\s*\n?/, '').trim()
-  return { text, hits: r.hits }
+  const r = filterSentences(raw, env.unavailable)
+  return { text: r.text, hits: r.hits }
 }
 
 function describeHit(h: GuardHit): string {

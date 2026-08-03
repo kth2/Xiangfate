@@ -52,6 +52,47 @@ export function friendlyError(e: unknown): string {
   return e instanceof Error ? e.message : '出了点问题，再试一次'
 }
 
+/**
+ * 超时。原来一个都没有 —— fetch 不带超时，读流也不带，
+ * 于是连接一旦卡住（切网、代理吞包、服务端开了流又不发数据），
+ * 界面就永远停在「正在推演」或者追问按钮的「…」上，既不报错也不结束。
+ */
+export const CONNECT_TIMEOUT_MS = 30_000
+/** 流中途多久没有新字节就判定为卡死 */
+export const STALL_TIMEOUT_MS = 45_000
+
+/**
+ * 把外部 signal 和一个超时合成一个。
+ * 不用 AbortSignal.any —— Safari 17 以下没有，而这是个装在手机上的 PWA。
+ */
+export function withTimeout(
+  external: AbortSignal | undefined,
+  ms: number,
+): { signal: AbortSignal; cleanup: () => void; timedOut: () => boolean } {
+  const ac = new AbortController()
+  let timedOut = false
+
+  const onExternalAbort = () => ac.abort()
+  if (external) {
+    if (external.aborted) ac.abort()
+    else external.addEventListener('abort', onExternalAbort, { once: true })
+  }
+
+  const timer = setTimeout(() => {
+    timedOut = true
+    ac.abort()
+  }, ms)
+
+  return {
+    signal: ac.signal,
+    cleanup: () => {
+      clearTimeout(timer)
+      external?.removeEventListener('abort', onExternalAbort)
+    },
+    timedOut: () => timedOut,
+  }
+}
+
 /** SSE 行解析：把 fetch 的字节流切成 data: 行 */
 export async function* sseLines(res: Response, signal?: AbortSignal): AsyncGenerator<string> {
   if (!res.body) throw new AIError('network', '响应没有内容')
@@ -62,9 +103,25 @@ export async function* sseLines(res: Response, signal?: AbortSignal): AsyncGener
   try {
     for (;;) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
+
+      // 读一段，同时盯着「多久没有新字节」—— 只靠 signal 是等不到的
+      let stallTimer: ReturnType<typeof setTimeout> | undefined
+      const stalled = new Promise<never>((_, reject) => {
+        stallTimer = setTimeout(
+          () => reject(new AIError('network', '连接中断了，网络恢复后重试一次')),
+          STALL_TIMEOUT_MS,
+        )
+      })
+
+      let chunk: ReadableStreamReadResult<Uint8Array>
+      try {
+        chunk = await Promise.race([reader.read(), stalled])
+      } finally {
+        clearTimeout(stallTimer)
+      }
+
+      if (chunk.done) break
+      buf += decoder.decode(chunk.value, { stream: true })
       const lines = buf.split('\n')
       buf = lines.pop() ?? ''
       for (const line of lines) {
@@ -74,6 +131,8 @@ export async function* sseLines(res: Response, signal?: AbortSignal): AsyncGener
     }
     if (buf.trim().startsWith('data:')) yield buf.trim().slice(5).trim()
   } finally {
+    // 卡死时 cancel 才能真正放掉底层连接，只 releaseLock 是不够的
+    await reader.cancel().catch(() => {})
     reader.releaseLock()
   }
 }

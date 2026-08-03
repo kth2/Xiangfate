@@ -124,6 +124,46 @@ export function guardReport(
   }
 }
 
+/**
+ * 只做逐句内容过滤，不碰结构、不补空节。
+ *
+ * 追问回答走这条路：它本来就没有六/七段式结构，
+ * 早先的做法是把答案包成一个假的「## 特征识别」再跑整套 finalizeReport，
+ * 结果 fillEmptySections 会把不足 50 字的答案整段换成
+ * 「（本次测得的特征不足以就这一部分展开，暂略。）」——
+ * 于是「这一点本次测量没有覆盖」这种正确且必要的短回答，
+ * 到用户眼前就变成了一句风马牛不相及的话。
+ */
+export function filterSentences(
+  raw: string,
+  unavailable: UnavailableItem[] = [],
+): { text: string; hits: GuardHit[]; stripped: number } {
+  const labels = unavailable.map((u) => u.label).filter((l) => l.length >= 2)
+  const hits: GuardHit[] = []
+  let stripped = 0
+  const kept: string[] = []
+
+  for (const line of raw.trim().split('\n')) {
+    if (/^\s*(#{1,6}\s|---|\*\*\*|$)/.test(line)) {
+      kept.push(line)
+      continue
+    }
+    const sentences = line.match(SENTENCE_RE) ?? [line]
+    const ok = sentences.filter((s) => {
+      const bad = scanSentence(s, labels)
+      if (bad) {
+        hits.push(bad)
+        stripped++
+      }
+      return !bad
+    })
+    const rebuilt = ok.join('')
+    if (rebuilt.trim() && !/^\s*[-*·]\s*$/.test(rebuilt)) kept.push(rebuilt)
+  }
+
+  return { text: kept.join('\n').trim(), hits, stripped }
+}
+
 /** 第二遍：不再重生成时，把 regenerate 类的句子也删掉 */
 export function finalizeReport(raw: string, unavailable: UnavailableItem[] = []): GuardResult {
   const first = guardReport(raw, unavailable, { allowRegenerate: false })
