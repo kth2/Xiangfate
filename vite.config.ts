@@ -4,7 +4,15 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import { fileURLToPath, URL } from 'node:url'
 
+/**
+ * 构建标识。用来回答一个反复卡住我们的问题：**手机上跑的到底是不是新构建**。
+ * PWA 的 Service Worker 会拿旧壳顶一阵子，没有这个标识就只能靠猜。
+ * 显示在「关于」页。
+ */
+const BUILD_ID = new Date().toISOString().slice(0, 16).replace('T', ' ')
+
 export default defineConfig({
+  define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

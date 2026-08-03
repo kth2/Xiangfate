@@ -104,6 +104,8 @@ export function About() {
       <div className="flex flex-col items-center gap-3">
         <Seal size={40} />
         <p className="text-[11px] text-subtle">相由心生 · 命由己造</p>
+        {/* PWA 会拿旧壳顶一阵子。出问题时先对一下这个，再判断是不是版本没更新 */}
+        <p className="text-[10px] text-subtle">构建 {__BUILD_ID__}</p>
       </div>
     </div>
   )

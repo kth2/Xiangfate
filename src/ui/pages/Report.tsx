@@ -16,6 +16,12 @@ import { VerdictList } from '../components/VerdictList'
 
 type Stage = 'idle' | 'streaming' | 'regenerating' | 'done' | 'error'
 
+/**
+ * 界面层的兜底停顿上限。比 provider 层的 45s 略长 ——
+ * 正常情况下应当由下面那层先报出更准确的原因，这里只负责「无论如何都别干等」。
+ */
+const UI_STALL_MS = 60_000
+
 export function Report() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -46,6 +52,17 @@ export function Report() {
   const sessionRef = useRef<AnalysisSession | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const startedRef = useRef(false)
+
+  /* ---- 兜底看门狗 ----
+   * provider 层已经有连接超时和流停顿超时了，这一层是**不依赖下面那层**的保险：
+   * 只要界面处于「等待中」而迟迟没有任何动静，就中断并给出重试入口。
+   * 这条的意义在于，无论下面出什么状况，用户都不会对着「正在推演」干等。
+   */
+  const [waited, setWaited] = useState(0)
+  const lastBeatRef = useRef(Date.now())
+  const beat = useCallback(() => {
+    lastBeatRef.current = Date.now()
+  }, [])
 
   const spec = envelope ? TYPE_SPECS[envelope.analysisType] : type ? TYPE_SPECS[type] : null
   const accent = spec?.accent ?? 'var(--color-gold-400)'
@@ -95,6 +112,7 @@ export function Report() {
 
     try {
       for await (const ev of session.generateReport(ac.signal)) {
+        beat()
         if (ev.delta) setReport((r) => r + ev.delta)
         if (ev.regenerating) {
           setRegenReasons(ev.regenerating)
@@ -117,17 +135,41 @@ export function Report() {
         }
       }
     } catch (e) {
-      if (e instanceof Error && e.name === 'AbortError') return
-      setError(friendlyError(e))
+      // 中断也必须落到一个看得见的状态。
+      // 原来这里是 `if (AbortError) return` —— 直接 return 会把 stage 留在
+      // 'streaming'、report 留空，界面于是永远停在「正在推演」，
+      // 既没有错误也没有重试入口。任何失败都要有出口。
+      startedRef.current = false
+      setError(
+        e instanceof Error && e.name === 'AbortError'
+          ? '这次生成被中断了，可以重试'
+          : friendlyError(e),
+      )
       setStage('error')
     }
-  }, [envelope, providerId, cfg.apiKey, cfg.model, cfg.baseUrl])
+  }, [envelope, providerId, cfg.apiKey, cfg.model, cfg.baseUrl, beat])
 
   useEffect(() => {
     if (!id && envelope && stage === 'idle') void generate()
   }, [id, envelope, stage, generate])
 
   useEffect(() => () => abortRef.current?.abort(), [])
+
+  // 等待期间计时；超过 UI_STALL_MS 没有任何动静就中断（catch 会给出重试入口）
+  useEffect(() => {
+    const busy = stage === 'streaming' || stage === 'regenerating' || asking
+    if (!busy) {
+      setWaited(0)
+      return
+    }
+    lastBeatRef.current = Date.now()
+    const started = Date.now()
+    const timer = setInterval(() => {
+      setWaited(Math.round((Date.now() - started) / 1000))
+      if (Date.now() - lastBeatRef.current > UI_STALL_MS) abortRef.current?.abort()
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [stage, asking])
 
   /* ---- 追问 ---- */
   function onAsk(e: React.FormEvent) {
@@ -167,6 +209,7 @@ export function Report() {
 
     try {
       for await (const ev of session.ask(q, ac.signal)) {
+        beat()
         if (ev.delta) setPending((p) => p + ev.delta)
         if (ev.done) {
           setFollowUps((f) => [...f, { question: q, answer: ev.done!.text }])
@@ -178,7 +221,11 @@ export function Report() {
       if (err instanceof CrisisInterrupt) {
         // 这一轮刻意不发给 AI
         setShowCare(true)
-      } else if (!(err instanceof Error && err.name === 'AbortError')) {
+      } else if (err instanceof Error && err.name === 'AbortError') {
+        // 可能是用户按了「停」，也可能是看门狗掐的 —— 两种都得说一声，
+        // 否则又是「点了没反应」
+        setAskError('这次追问被中断了，可以再问一次')
+      } else {
         setAskError(friendlyError(err))
       }
       setPending('')
@@ -268,13 +315,31 @@ export function Report() {
           ) : report ? (
             <Markdown text={report} accent={accent} />
           ) : (
-            <div className="flex items-center gap-3 py-8">
-              <span
-                aria-hidden
-                className="h-1 w-1 animate-pulse rounded-full"
-                style={{ background: accent }}
-              />
-              <p className="font-title text-[13px] tracking-[0.2em] text-muted">正在推演</p>
+            <div className="py-8">
+              <div className="flex items-center gap-3">
+                <span
+                  aria-hidden
+                  className="h-1 w-1 animate-pulse rounded-full"
+                  style={{ background: accent }}
+                />
+                <p className="font-title text-[13px] tracking-[0.2em] text-muted">
+                  正在推演{waited > 3 ? ` · ${waited}s` : ''}
+                </p>
+              </div>
+              {waited > 20 && (
+                <div className="mt-4">
+                  <p className="text-[12px] leading-relaxed text-subtle">
+                    比平时久了一些。网络不稳时可以中断重来。
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => abortRef.current?.abort()}
+                    className="btn-outline mt-3 h-10 px-6 text-[13px]"
+                  >
+                    中断
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

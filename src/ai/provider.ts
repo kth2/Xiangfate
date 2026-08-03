@@ -131,8 +131,10 @@ export async function* sseLines(res: Response, signal?: AbortSignal): AsyncGener
     }
     if (buf.trim().startsWith('data:')) yield buf.trim().slice(5).trim()
   } finally {
-    // 卡死时 cancel 才能真正放掉底层连接，只 releaseLock 是不够的
-    await reader.cancel().catch(() => {})
+    // 卡死时 cancel 才能真正放掉底层连接，只 releaseLock 是不够的。
+    // 但**不能 await** —— 这是 async generator 的 finally，
+    // 一旦 cancel 不落地就会把整个消费循环一起吊住，等于把要修的病换个地方犯。
+    void reader.cancel().catch(() => {})
     reader.releaseLock()
   }
 }
