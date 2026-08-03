@@ -4,8 +4,8 @@
  * 这里是「数值先行，术语其次」原则的落点：先有可复现的几何数值，
  * 再映射到传统术语，evidence 里必须带上具体数字。
  *
- * ⚠️ 所有 meaning 文案都已过 docs/07 的内容策略：
- * 不含人格贬损、性别刻板、寿夭断言、疾病指向。「不足」一律写成课题/提醒。
+ * ⚠️ meaning 文案按 docs/07 的硬边界写：不含寿夭断言、疾病指向、性别刻板、身材贬损。
+ * 除此之外**照相书原意写**——忌相就是忌相，六亲缘薄就是六亲缘薄，不作好听的改写。
  */
 
 import {
@@ -99,9 +99,9 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
     const weakest = (['upper', 'middle', 'lower'] as const).reduce((a, b) => (c[a] <= c[b] ? a : b))
     if (c[weakest] <= T.court.lo) {
       const WCFG = {
-        upper: { label: '上停偏窄', meaning: '早年更靠自立，务实取向' },
-        middle: { label: '中停平和', meaning: '中年宜稳中求进，善借外缘' },
-        lower: { label: '下停偏窄', meaning: '晚年宜早作规划，重在养蓄' },
+        upper: { label: '上停偏窄', meaning: '传统主早年少荫庇，祖业父荫薄，须自立门户' },
+        middle: { label: '中停平和', meaning: '传统主中年运势平平，进取之力稍逊，宜借外缘' },
+        lower: { label: '下停偏窄', meaning: '传统主晚运偏薄，根基不厚，须早作积蓄' },
       }
       push(
         `face.threeCourts.${weakest}Weak`, '三停', WCFG[weakest].label, 'low', pct(c[weakest]),
@@ -122,8 +122,8 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
     fiveBand === 'balanced'
       ? '五官格局端正，与人相处顺畅'
       : fiveBand === 'high' || fiveBand === 'very_high'
-        ? '格局开阔，长于统观全局，可留意细节把控'
-        : '感受敏锐，对细节有天然的注意力',
+        ? '格局开阔，长于统观全局；然失于粗疏，细处不耐烦'
+        : '面窄眼大，传统主气量偏局促、易为小事所困，然感受敏锐',
     '麻衣神相',
   )
 
@@ -136,8 +136,8 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
     gapBand === 'balanced'
       ? '心胸开阔，不计较小节'
       : gapBand === 'low' || gapBand === 'very_low'
-        ? '专注度高，做事投入，可有意放宽视角'
-        : '视野宏观，思路发散，可补一点收束',
+        ? '传统主心量偏窄、易执着于眼前，心事不易放下'
+        : '传统主心大而疏，思路发散，收束之力不足',
     '神相全编',
   )
 
@@ -153,7 +153,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
       ? '传统主兄弟朋友情深、助力较多'
       : browLenBand === 'balanced'
         ? '人际关系平衡，亲疏有度'
-        : '独立自主，人脉宜主动经营',
+        : '传统主兄弟缘薄、六亲助力少，凡事多靠自己',
     '麻衣神相',
   )
 
@@ -176,7 +176,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
     gapB, round(browGap), 'measured', conf('geometry'),
     `两眉头间距为单眼宽的 ${browGap.toFixed(2)} 倍`,
     browGap < T.browGapNarrow
-      ? '心思专注细密，可有意让自己松弛一些'
+      ? '传统主心量狭窄、多思多虑，遇事易钻牛角尖，运途多滞'
       : '心胸开阔，遇事不易钻牛角尖',
     '麻衣神相',
   )
@@ -191,10 +191,10 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
       dBand, round(density), 'inferred', conf('density'),
       `眉部区域暗像素占比 ${(density * 100).toFixed(0)}%`,
       dBand === 'high' || dBand === 'very_high'
-        ? '精力充沛，行动力与助力运皆佳'
+        ? '精力充沛，行动力与助力运皆佳；过浓则传统主性躁气盛，易与人争'
         : dBand === 'balanced'
           ? '张弛有度，做事有分寸'
-          : '风格清简，人际上宜主动结缘',
+          : '传统主兄弟缘薄、助力寡少，情性偏冷',
       '神相全编',
     )
 
@@ -203,7 +203,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
       'face.brow.tail', '眉', disp < 0.12 ? '眉尾聚拢' : '眉尾疏散', disp < 0.12 ? 'high' : 'low',
       round(disp), 'inferred', conf('density'),
       `眉尾区域灰度标准差 ${disp.toFixed(3)}（越低越聚拢）`,
-      disp < 0.12 ? '做事有始有终，责任心强' : '想法灵活多变，收尾环节可多留一分力',
+      disp < 0.12 ? '做事有始有终，责任心强' : '传统称眉尾散乱，主有始无终、心志易移，财帛亦难聚',
       '神相全编',
     )
   } else {
@@ -234,11 +234,11 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
       ? '心地清明，是非分明，观察力佳'
       : opBand === 'balanced'
         ? '目光温和，待人有度'
-        : '内敛沉静，凡事先想后说',
+        : '传统称目光藏而不露，主城府较深、心事不轻示人',
     '麻衣神相',
   )
 
-  // 三白眼 —— 已按 docs/07 中性化改写
+  // 三白眼
   const sclera = Math.max(
     bilateral(m.eye.left.scleraUpper, m.eye.right.scleraUpper),
     bilateral(m.eye.left.scleraLower, m.eye.right.scleraLower),
@@ -247,7 +247,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
     push(
       'face.eye.sclera', '眼', '三白眼', 'categorical', round(sclera), 'measured', conf('geometry'),
       `虹膜上下方巩膜暴露达眼高的 ${(sclera * 100).toFixed(0)}%`,
-      '传统称此眼型者主见强、界限感清晰，自有一套判断标准',
+      '传统列为忌相，主薄情寡义、六亲缘浅，性刚而执，行事以己意为先',
       '神相全编',
     )
   }
@@ -259,7 +259,9 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
     'face.nose.bridge', '鼻', straight ? '鼻梁挺直' : '鼻梁微曲',
     straight ? 'high' : 'low', round(n.bridgeDeviation, 3), 'measured', conf('geometry'),
     `鼻梁中轴最大偏移为 IOD 的 ${(n.bridgeDeviation * 100).toFixed(1)}%（挺直线为 ${(T.bridgeStraight * 100).toFixed(0)}%）`,
-    straight ? '为人正直，意志坚定，认准方向不易动摇' : '处事灵活，善于因势调整',
+    straight
+      ? '为人正直，意志坚定，认准方向不易动摇'
+      : '传统称鼻梁欹曲，主中年多蹇滞、心思偏曲，处事好变通而少定见',
     '麻衣神相',
   )
 
@@ -273,7 +275,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
       ? '意志力强，中年主运，自我驱动足'
       : bhBand === 'balanced'
         ? '性情平和，进退有据'
-        : '更依赖外缘助力；主动争取与借力，会比单打独斗更适合',
+        : '山根低陷，古法列为中年之忌，主意志易摇、根基不固，成事须仗外力',
     '神相全编',
   )
 
@@ -287,7 +289,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
       ? '财帛宫佳，善于积累，正财稳健'
       : tfBand === 'balanced'
         ? '用度有节，收支有数'
-        : '重精神层面甚于物质积累',
+        : '准头尖薄，传统主财帛无根、聚散不定，重神而不重财',
     '麻衣神相',
   )
 
@@ -297,7 +299,9 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
     awBand === 'high' || awBand === 'very_high' ? '鼻翼丰满' : awBand === 'balanced' ? '鼻翼适中' : '鼻翼清秀',
     awBand, round(n.alarWidth), 'measured', conf('geometry'),
     `鼻翼宽为 IOD 的 ${(n.alarWidth * 100).toFixed(0)}%`,
-    awBand === 'high' || awBand === 'very_high' ? '财库充实，守成有力' : '用度简省，不尚铺张',
+    awBand === 'high' || awBand === 'very_high'
+      ? '财库充实，守成有力'
+      : '鼻翼薄削，传统主财库不固、进易出难，守成之力偏弱',
     '神相全编',
   )
 
@@ -313,7 +317,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
       ? '心胸宽广，有包容力，敢于表达'
       : mwBand === 'balanced'
         ? '言行得体，进退有度'
-        : '谨慎内敛，重视私人空间',
+        : '口小于鼻，传统主气量偏窄、食禄不丰，遇事怯于开口',
     '麻衣神相',
   )
 
@@ -326,7 +330,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
     mo.cornerLift >= T.cornerUp
       ? '乐观开朗，人缘极佳'
       : mo.cornerLift <= T.cornerDown
-        ? '认真严谨，凡事求稳，可多让自己舒展'
+        ? '口角下垂，传统主性情执拗、心多不平，与人相处失于亲和'
         : '神色平和，喜怒不形于色',
     '神相全编',
   )
@@ -340,7 +344,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
     mo.lipThickness >= T.lipThick
       ? '情感丰富，为人厚道'
       : mo.lipThickness <= T.lipThin
-        ? '言辞精准，偏理性沟通'
+        ? '唇薄者传统主情性偏淡、待人少温，然言辞锋利、说理不让人'
         : '表达有分寸，情理兼顾',
     '麻衣神相',
   )
@@ -355,7 +359,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
       ? '传统主子女缘厚、晚年有依'
       : phBand === 'balanced'
         ? '家庭关系平顺'
-        : '家庭关系宜多用心经营',
+        : '人中浅短，传统主六亲缘薄、晚景少依，家中之事多不由己',
     '柳庄相法',
   )
 
@@ -370,7 +374,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
       ? '传统主居处安稳、置业有福，性情也偏宽和'
       : tzBand === 'balanced'
         ? '家宅安宁，起居有序'
-        : '行事紧凑高效，居处宜简',
+        : '田宅逼窄，传统主居处不安、田产难守，性亦偏急',
     '神相全编',
   )
 
@@ -484,12 +488,12 @@ interface Shape {
 function classifyBrow(curve: number, tilt: number): Shape {
   if (curve < T.browStraight) {
     if (tilt > 8) {
-      return { label: '大刀眉', meaning: '有勇有谋，好胜心强，敢于争取', source: '神相全编' }
+      return { label: '大刀眉', meaning: '有勇有谋，好胜心强；性偏刚烈，争胜之心重', source: '神相全编' }
     }
-    return { label: '一字眉', meaning: '果决有胆识，认定的事不轻易改，可留意变通', source: '麻衣神相' }
+    return { label: '一字眉', meaning: '果决有胆识，然性情执拗，认定之事不容人劝', source: '麻衣神相' }
   }
   if (tilt < -3) {
-    return { label: '八字眉', meaning: '外冷内热，为人豁达，不拘小节', source: '柳庄相法' }
+    return { label: '八字眉', meaning: '外冷内热，为人豁达不拘小节，然做事失于疏懒', source: '柳庄相法' }
   }
   if (curve >= T.browCrescentLo && curve <= T.browCrescentHi) {
     return { label: '新月眉', meaning: '心思细腻，有艺术气质，考虑周到', source: '神相全编' }
@@ -500,35 +504,35 @@ function classifyBrow(curve: number, tilt: number): Shape {
 /** 眼形五分类 */
 function classifyEye(aspect: number, tilt: number): Shape {
   if (aspect >= T.eyeRound) {
-    return { label: '圆眼', meaning: '直率热情，情感外露，反应敏捷', source: '神相全编' }
+    return { label: '圆眼', meaning: '直率热情，反应敏捷；情绪外露，藏不住事', source: '神相全编' }
   }
   if (aspect <= T.eyeNarrow && tilt >= T.canthalUp) {
-    return { label: '丹凤眼', meaning: '聪明灵巧，爱憎分明，重承诺守信用', source: '麻衣神相' }
+    return { label: '丹凤眼', meaning: '聪明灵巧，爱憎分明；心有城府，喜怒不轻示人', source: '麻衣神相' }
   }
   if (tilt <= T.canthalDown) {
-    return { label: '垂眼', meaning: '心思缜密，性情柔顺平和，善解人意', source: '柳庄相法' }
+    return { label: '垂眼', meaning: '心思缜密，性情柔顺；然优柔少断，事到临头易退', source: '柳庄相法' }
   }
   if (aspect >= 0.33 && aspect <= 0.4 && tilt >= 2 && tilt <= T.canthalUp) {
-    return { label: '桃花眼', meaning: '才艺天分佳，人缘好，善于感染他人', source: '神相全编' }
+    return { label: '桃花眼', meaning: '才艺人缘俱佳，然多情而心易动，情事上常有波折', source: '神相全编' }
   }
   return { label: '端正眼', meaning: '眼形匀称，处事持中，观察细致', source: '麻衣神相' }
 }
 
 const FIVE_MEANING: Record<FiveElement | '兼形', string> = {
-  金: '刚毅果断，明辨是非，重义气与原则',
-  木: '仁厚耿直，有才华，坚持自己认定的道理',
-  水: '智慧灵活，适应力强，善于交际周旋',
-  火: '热情积极，行动力强，节奏偏快',
-  土: '稳重踏实，讲信用，重承诺与长期积累',
-  兼形: '兼具多形之长，可塑性强，能因时因势调整',
+  金: '刚毅果断，重义守则；失之则过于严苛，不容人过',
+  木: '仁厚耿直，有才；然性偏孤介，不合流俗',
+  水: '智慧灵活，善交际周旋；失之则心多机巧、意志不专',
+  火: '热情积极，行动力强；性急气盛，事到临头难耐',
+  土: '稳重踏实，重承诺积累；失之则迟钝守旧，少变通',
+  兼形: '兼具多形，可塑性强；然形不纯，气亦驳杂，主一生起落多端',
 }
 
 const FACE_SHAPE_MEANING: Record<FaceShape, string> = {
-  圆脸: '亲和随顺，人缘佳，善于化解僵局',
-  瓜子脸: '心思细腻，审美佳，重内在质地',
-  由字脸: '根基扎实，后劲足，重实际',
-  国字脸: '格局方正，担当力强，可信赖',
-  甲字脸: '思虑敏捷，早慧，长于谋划',
+  圆脸: '亲和随顺，人缘佳；然失于任性，遇事怕硬',
+  瓜子脸: '心思细腻，审美佳；然神弱骨轻，任事之力不足',
+  由字脸: '根基扎实，后劲足；早年不得力，须晚成',
+  国字脸: '格局方正，担当力强，可信赖；性亦刚，少回旋',
+  甲字脸: '思虑敏捷早慧，长于谋划；下停偏薄，晚运须早图',
 }
 
 function classifyFiveElements(m: FaceMetrics): {

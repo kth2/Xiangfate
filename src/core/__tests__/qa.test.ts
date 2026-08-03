@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { preflightQuestion } from '../guard'
-import { BANNED_ABSOLUTE, BANNED_FATE, BANNED_GENDERED, BANNED_STIGMA } from '../guard.rules'
+import { BANNED_FATE, BANNED_GENDERED, BANNED_MEDICAL } from '../guard.rules'
 import { ANSWER_STRUCTURE, detectTopics, TOPIC_GUIDES, TOPIC_ORDER, TYPE_QA_NOTES } from '../qa'
 import { PRESET_QUESTIONS, presetsFor } from '@/copy/questions.zh-CN'
 import { buildFollowUpPrompt } from '@/prompts/user'
@@ -46,13 +46,18 @@ describe('主题判定', () => {
 })
 
 describe('高危主题必须带 boundary', () => {
-  // 这几项在 docs/07 里被明确改写过，只给传统答法等于放模型按旧规矩答
+  // 落在 docs/07 四条硬边界上的主题，只给传统答法等于放模型越界
   it.each(['health', 'relationship', 'children', 'timing', 'wealth'] as const)(
     '%s 有 boundary',
     (topic) => {
       expect(TOPIC_GUIDES[topic].boundary?.length ?? 0).toBeGreaterThan(10)
     },
   )
+
+  // 反过来：性格与格局不该再有「换个好听说法」式的约束
+  it.each(['personality', 'overall'] as const)('%s 不设 boundary', (topic) => {
+    expect(TOPIC_GUIDES[topic].boundary).toBeUndefined()
+  })
 })
 
 describe('预设问题', () => {
@@ -75,7 +80,7 @@ describe('预设问题', () => {
   })
 
   it('自身不含禁用词', () => {
-    const banned = [...BANNED_ABSOLUTE, ...BANNED_FATE, ...BANNED_STIGMA, ...BANNED_GENDERED]
+    const banned = [...BANNED_FATE, ...BANNED_GENDERED, ...BANNED_MEDICAL]
     for (const p of all) {
       for (const w of banned) expect(p.text).not.toContain(w)
     }

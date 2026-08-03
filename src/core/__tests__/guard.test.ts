@@ -59,7 +59,6 @@ describe('内容过滤 —— 直接删句的类别', () => {
     ['寿夭断言', '耳小薄削者主短命，需要格外注意。'],
     ['克夫克妻', '这样的面相容易克夫，婚姻上要当心。'],
     ['疾病诊断', '气色发黄说明肝胆有问题，建议尽快就医检查。'],
-    ['人格污名', '此人心术不正，为人狡诈，不宜深交。'],
     ['身材歧视', '矮个子的人格局有限，难成大事。'],
     ['性别刻板', '女命主旺夫，宜嫁得早一些。'],
     ['具体时间预测', '明年三月会有一次重要的事业机遇。'],
@@ -82,16 +81,37 @@ describe('内容过滤 —— 直接删句的类别', () => {
   })
 })
 
-describe('内容过滤 —— 触发重生成的类别', () => {
-  it('绝对化措辞触发重生成', () => {
-    const r = guardReport(makeReport('你注定会在中年之后大富大贵。'), unavailable)
-    expect(r.shouldRegenerate).toBe(true)
-    expect(r.hits.some((h) => h.category === 'absolute')).toBe(true)
+/**
+ * 2026-08：内容边界收窄到四条硬边界（docs/07 第一节）。
+ * 传统相书的性格断语与断定口气不再拦 —— 这是本 App 要呈现的东西，
+ * 拦掉它等于把相术的判断力删掉。
+ */
+describe('传统断语放行', () => {
+  const kept: [string, string][] = [
+    ['人格断语', '三白眼，传统列为忌相，主薄情寡义、六亲缘浅。'],
+    ['城府心机', '目光藏而不露，此相传统主城府较深、心事不轻示人。'],
+    ['性情急躁', '眉浓而逆，传统主性情急躁、气盛易与人争。'],
+    ['忌相与断定口气', '山根低陷，古法列为中年之忌，主意志易摇，必仗外力方能成事。'],
+    ['六亲缘薄', '人中浅短，传统主六亲缘薄、晚景少依。'],
+  ]
+
+  for (const [name, sentence] of kept) {
+    it(`${name}被保留`, () => {
+      const r = finalizeReport(makeReport(sentence), unavailable)
+      expect(r.text).toContain(sentence)
+    })
+  }
+
+  it('不再因为措辞触发重生成', () => {
+    const r = guardReport(makeReport('此相必主心机较深，六亲缘薄。'), unavailable)
+    expect(r.shouldRegenerate).toBe(false)
+    expect(r.hits.filter((h) => h.action === 'regenerate')).toHaveLength(0)
   })
 
-  it('不给第二次机会时绝对化措辞被删', () => {
-    const r = finalizeReport(makeReport('你注定会在中年之后大富大贵。'), unavailable)
-    expect(r.text).not.toContain('注定')
+  it('放行性格断语，但同句里的疾病指向照删', () => {
+    const r = finalizeReport(makeReport('此人城府较深。气色晦滞说明肝胆有问题。'), unavailable)
+    expect(r.text).toContain('城府较深')
+    expect(r.text).not.toContain('肝胆')
   })
 })
 
