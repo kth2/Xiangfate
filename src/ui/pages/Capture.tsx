@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { getTypeSpec, isAnalysisType, type ShotSpec } from '@/core/registry'
-import { captureVideoFrame, loadImageFile } from '@/core/image'
+import { captureVideoBurst, loadImageFile } from '@/core/image'
 import { formatMb, totalBytes } from '@/mediapipe/loader'
 import { detect, eulerFromMatrix, NoSubjectError, type DetectResult } from '@/mediapipe/detect'
 import { buildMianxiangEnvelope } from '@/modules/mianxiang/pipeline'
@@ -38,7 +38,15 @@ interface Captured {
   detection: DetectResult
   bitmap: ImageBitmap
   previewUrl: string
+  /** 连拍的其余帧（相册上传时为空）。只用来给几何量取中位数，像素活仍只在代表帧上跑 */
+  extraDetections?: DetectResult[]
 }
+
+/**
+ * 连拍帧数。5 帧 × 120ms ≈ 0.6 秒，用户感觉不到，
+ * 但足以把关键点抖动和一瞬间的表情平掉。再多则边际收益递减、等待变明显。
+ */
+const BURST_FRAMES = 5
 
 export function Capture() {
   const { type } = useParams()
@@ -132,7 +140,11 @@ export function Capture() {
     }
   }
 
-  async function runDetection(bitmap: ImageBitmap, previewUrl: string) {
+  async function runDetection(
+    bitmap: ImageBitmap,
+    previewUrl: string,
+    extraBitmaps: ImageBitmap[] = [],
+  ) {
     const shot = currentShot!
     setPreview(previewUrl)
     setStage('loading')
@@ -149,14 +161,27 @@ export function Capture() {
         prev.bitmap.close()
         URL.revokeObjectURL(prev.previewUrl)
       }
+      // 连拍的其余帧：只取关键点，取完立刻释放位图
+      const extraDetections: DetectResult[] = []
+      for (const b of extraBitmaps) {
+        try {
+          extraDetections.push(await detect(shot.detector, b))
+        } catch {
+          // 某一帧没检出人脸就丢掉这帧，不影响主帧
+        } finally {
+          b.close()
+        }
+      }
+
       capturedRef.current = [
         ...capturedRef.current.filter((c) => c.kind !== shot.kind),
-        { kind: shot.kind, detection: res, bitmap, previewUrl },
+        { kind: shot.kind, detection: res, bitmap, previewUrl, extraDetections },
       ]
       setResult(res)
       setStage('result')
     } catch (e) {
       bitmap.close()
+      for (const b of extraBitmaps) b.close()
       URL.revokeObjectURL(previewUrl)
       setPreview(null)
       setStage('pick')
@@ -183,9 +208,12 @@ export function Capture() {
   async function onShutter() {
     if (!videoRef.current) return
     try {
-      const img = await captureVideoFrame(videoRef.current)
+      // 连拍：同机位同角度取几帧，几何量取中位数，抖动本身用来折算置信度。
+      // 详见 core/frames.ts。相册上传没有这个条件，走单帧路径。
+      const burst = await captureVideoBurst(videoRef.current, BURST_FRAMES)
       stopCamera()
-      await runDetection(img.bitmap, img.previewUrl)
+      const [main, ...rest] = burst.bitmaps
+      await runDetection(main, burst.previewUrl, rest)
     } catch (err) {
       setError(err instanceof Error ? err.message : '拍摄失败')
     }
@@ -217,7 +245,12 @@ export function Capture() {
         case 'mianxiang': {
           const front = caps.find((c) => c.kind === 'front')
           if (!front) throw new Error('缺少正面照')
-          env = buildMianxiangEnvelope({ detection: front.detection, bitmap: front.bitmap, subject })
+          env = buildMianxiangEnvelope({
+            detection: front.detection,
+            bitmap: front.bitmap,
+            subject,
+            extraDetections: front.extraDetections,
+          })
           break
         }
 

@@ -14,6 +14,7 @@ import {
   type OcclusionKind,
   type Subject,
 } from '@/core/types'
+import { medianOfSamples, stabilityOf } from '@/core/frames'
 import { toImageData } from '@/core/image'
 import { eulerFromMatrix, type DetectResult } from '@/mediapipe/detect'
 import { COMPLEXION_REGIONS } from './landmarks'
@@ -25,9 +26,20 @@ export interface BuildInput {
   detection: DetectResult
   bitmap: ImageBitmap
   subject?: Subject
+  /**
+   * 连拍的其余帧（不含 detection 本身那一帧）。
+   * 给了就逐帧算几何量再取中位数，并用帧间离散度折算置信度；
+   * 不给则完全等同于单张照片的旧行为 —— 相册上传走的就是这条路。
+   */
+  extraDetections?: DetectResult[]
 }
 
-export function buildMianxiangEnvelope({ detection, bitmap, subject }: BuildInput): AnalysisEnvelope {
+export function buildMianxiangEnvelope({
+  detection,
+  bitmap,
+  subject,
+  extraDetections,
+}: BuildInput): AnalysisEnvelope {
   const { landmarks, blendshapes, transformMatrix, detectorScore } = detection
   const img = toImageData(bitmap)
 
@@ -49,7 +61,18 @@ export function buildMianxiangEnvelope({ detection, bitmap, subject }: BuildInpu
     occlusion,
   })
 
-  const m = computeFaceMetrics(landmarks, bitmap.width, bitmap.height)
+  /*
+   * 连拍：逐帧算几何量后取中位数。
+   * 像素类的活（气色、眉毛浓密、痣、卧蚕、法令）仍只在代表帧上跑一次 ——
+   * 那几项吃的是同一张图的同一片像素，多跑几遍不会更准，只会更慢。
+   */
+  const frameSamples = [landmarks, ...(extraDetections ?? []).map((d) => d.landmarks)].map((lm) =>
+    computeFaceMetrics(lm, bitmap.width, bitmap.height),
+  )
+  const m = medianOfSamples(frameSamples)
+  const stability = stabilityOf(frameSamples)
+  // 帧间抖得厉害 → 这一次采集本身就不可靠，几何论断一并弱化
+  const effectiveScore = detectorScore * stability.factor
 
   const complexion =
     complexionFactor > 0
@@ -92,7 +115,7 @@ export function buildMianxiangEnvelope({ detection, bitmap, subject }: BuildInpu
     m,
     qualityFactor,
     complexionFactor,
-    detectorScore,
+    detectorScore: effectiveScore,
     complexion,
     browPixels,
     foreheadOccluded,
@@ -143,6 +166,12 @@ export function buildMianxiangEnvelope({ detection, bitmap, subject }: BuildInpu
             }
           : {}),
         ...(moles && !moles.failed ? { 检出痣数: moles.moles.length } : {}),
+        ...(stability.frames > 1
+          ? {
+              连拍帧数: stability.frames,
+              帧间离散度: stability.dispersion,
+            }
+          : {}),
       },
       ...(complexion
         ? {

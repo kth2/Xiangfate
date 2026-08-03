@@ -13,10 +13,12 @@
  */
 
 import {
+  applyMargin,
   computeConfidence,
   partitionByConfidence,
   round,
   toBand,
+  type BandSpec,
   type DraftFeature,
 } from '@/core/band'
 import type {
@@ -58,7 +60,12 @@ export function applyBoneRules(input: BoneRuleInput): BoneRuleOutput {
     id: string, category: FeatureCategory, label: string, band: DraftFeature['band'],
     value: string | number, status: DraftFeature['status'], confidence: number,
     evidence: string, meaning: string, source: Classic | null,
-  ) => drafts.push({ id, category, label, band, value, status, confidence, evidence, meaning, source })
+    /** 该项的分档区间。给了就顺带算判线余量，贴线时压低置信度并在证据里说明 */
+    spec?: BandSpec,
+  ) => drafts.push(applyMargin(
+    { id, category, label, band, value, status, confidence, evidence, meaning, source },
+    spec,
+  ))
 
   /* ============ 颧骨（权力骨）============ */
   const zpBand = toBand(m.zygoProminence, T.zygoProminence)
@@ -73,6 +80,7 @@ export function applyBoneRules(input: BoneRuleInput): BoneRuleOutput {
         ? '性格平衡，处事稳重'
         : '颧低无势，传统主无权柄、居人之下，遇事难自主',
     '太清神鉴',
+    T.zygoProminence,
   )
 
   push(
@@ -122,6 +130,7 @@ export function applyBoneRules(input: BoneRuleInput): BoneRuleOutput {
         ? '思路清晰，稳中求进'
         : '务实专注，长于深耕；可有意识地拓宽视角',
     '太清神鉴',
+    T.foreheadHeight,
   )
 
   push(
@@ -167,6 +176,7 @@ export function applyBoneRules(input: BoneRuleInput): BoneRuleOutput {
         ? '进取有度，稳中求变'
         : '谨慎保守，凡事先看清再动',
     '太清神鉴',
+    T.templeRatio,
   )
 
   const brBand = toBand(m.browRidge, T.browRidge)
@@ -179,6 +189,7 @@ export function applyBoneRules(input: BoneRuleInput): BoneRuleOutput {
       ? '性格有力度，对事情有掌控意愿'
       : '性情温和，不喜冲突，相处轻松',
     '人伦大统赋',
+    T.browRidge,
   )
 
   /* ============ 骨肉关系（本模块最可靠）============ */

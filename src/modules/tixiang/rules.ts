@@ -9,10 +9,12 @@
  */
 
 import {
+  applyMargin,
   computeConfidence,
   partitionByConfidence,
   round,
   toBand,
+  type BandSpec,
   type DraftFeature,
 } from '@/core/band'
 import type {
@@ -56,7 +58,12 @@ export function applyBodyRules(input: BodyRuleInput): BodyRuleOutput {
     id: string, category: FeatureCategory, label: string, band: DraftFeature['band'],
     value: string | number, status: DraftFeature['status'], confidence: number,
     evidence: string, meaning: string, source: Classic | null,
-  ) => drafts.push({ id, category, label, band, value, status, confidence, evidence, meaning, source })
+    /** 该项的分档区间。给了就顺带算判线余量，贴线时压低置信度并在证据里说明 */
+    spec?: BandSpec,
+  ) => drafts.push(applyMargin(
+    { id, category, label, band, value, status, confidence, evidence, meaning, source },
+    spec,
+  ))
 
   /* ============ 身体比例 ============ */
   const shBand = toBand(m.shoulderHipRatio, T.shoulderHip)
@@ -71,6 +78,7 @@ export function applyBodyRules(input: BodyRuleInput): BodyRuleOutput {
         ? '亲和包容，重和谐，与人相处不带压迫感'
         : '体格匀称，进退有度',
     '冰鉴',
+    T.shoulderHip,
   )
 
   if (m.upperLowerRatio !== null) {
@@ -86,6 +94,7 @@ export function applyBodyRules(input: BodyRuleInput): BodyRuleOutput {
           ? '偏行动型，执行力强，说做就做'
           : '思与行并重，节奏协调',
       '神相全编',
+      T.upperLower,
     )
   } else {
     unavailable.push({
@@ -106,6 +115,7 @@ export function applyBodyRules(input: BodyRuleInput): BodyRuleOutput {
         ? '体态匀称，不疾不徐'
         : '稳重务实，行动干脆',
     '冰鉴',
+    T.neck,
   )
 
   if (m.armReach !== null) {
@@ -181,6 +191,7 @@ export function applyBodyRules(input: BodyRuleInput): BodyRuleOutput {
           ? '自律优雅，举止收敛'
           : '站姿松弛得当',
       '冰鉴',
+      T.stance,
     )
   }
 

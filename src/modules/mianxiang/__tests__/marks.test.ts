@@ -137,6 +137,57 @@ describe('法令纹', () => {
   })
 })
 
+/**
+ * 自归一化才是这几个像素指标能跨照片比较的前提。
+ * 降对比度模拟「隔着雾/低光/过度压缩」——绝对深度一定会掉，
+ * 但对照线同样会掉，所以倍数应当基本不动。
+ */
+describe('对同脸平颊基线的归一化', () => {
+  function lowerContrast(img: ImageData, k: number): ImageData {
+    const out = makeImageData(W, H)
+    for (let i = 0; i < img.data.length; i += 4) {
+      for (let c = 0; c < 3; c++) out.data[i + c] = 128 + (img.data[i + c] - 128) * k
+      out.data[i + 3] = 255
+    }
+    return out
+  }
+
+  it('法令：绝对深度随对比度掉，倍数基本不变', () => {
+    const img = skinFace()
+    paintLine(img, LM[NOSE.alarLeft], LM[MOUTH.cornerLeft], Math.max(1.5, iodPx * 0.012))
+
+    const normal = measureNasolabial(img, LM, 'left')
+    const hazy = measureNasolabial(lowerContrast(img, 0.45), LM, 'left')
+
+    expect(hazy.depth).toBeLessThan(normal.depth)
+    expect(normal.depthRatio).toBeGreaterThan(1.5)
+    // 倍数是这次改动的重点：同一道纹，换个光照条件仍要判成同一档
+    expect(hazy.depthRatio).toBeGreaterThan(1.5)
+    expect(Math.abs(hazy.depthRatio - normal.depthRatio) / normal.depthRatio).toBeLessThan(0.35)
+  })
+
+  it('法令：没有纹时倍数接近 1', () => {
+    const r = measureNasolabial(skinFace(), LM, 'left')
+    expect(r.depthRatio).toBeLessThan(1.5)
+  })
+
+  it('卧蚕：同理给出相对同脸平颊的倍数', () => {
+    const img = skinFace()
+    const lid = LM[EYE.left.lower]
+    paintLine(
+      img,
+      { x: LM[EYE.left.inner].x, y: lid.y + (iodPx * 0.09) / H },
+      { x: LM[EYE.left.outer].x, y: lid.y + (iodPx * 0.09) / H },
+      Math.max(1.5, iodPx * 0.015),
+    )
+    const normal = measureEyeBag(img, LM, 'left')
+    const hazy = measureEyeBag(lowerContrast(img, 0.45), LM, 'left')
+
+    expect(normal.ridgeRatio).toBeGreaterThan(1)
+    expect(hazy.ridgeRatio).toBeGreaterThan(1)
+  })
+})
+
 describe('卧蚕 / 泪堂', () => {
   it('平脸上隆起与深陷都接近 0', () => {
     const r = measureEyeBag(skinFace(), LM, 'left')

@@ -28,6 +28,77 @@ export function toBand(value: number, spec: BandSpec): Band {
 }
 
 /**
+ * 判线余量：测量值离最近的那条分档线有多远，以中和区半宽为单位。
+ *
+ * 为什么需要它 —— 分档是硬阈值。一个人的印堂落在判线的 0.99 倍，
+ * 拿到的是「印堂偏窄，主心量狭窄」这句重话，而且置信度照给不误；
+ * 1.01 倍则一句都没有。而阈值本身是工程判断（见 thresholds 里的 CALIBRATE），
+ * 判线附近那点差异，测量噪声就能盖过去。
+ *
+ * 0 = 正压在判线上（两可之间），≥1 = 离判线足够远，可以照直说。
+ */
+export function bandMargin(value: number, spec: BandSpec): number {
+  const scale = (spec.hi - spec.lo) / 2
+  if (!(scale > 0)) return 1
+  const d = Math.min(
+    Math.abs(value - spec.veryLo),
+    Math.abs(value - spec.lo),
+    Math.abs(value - spec.hi),
+    Math.abs(value - spec.veryHi),
+  )
+  return clamp01(d / scale)
+}
+
+/** 余量小于此值即视为「贴近判线，两可之间」 */
+export const BORDERLINE_MARGIN = 0.15
+
+export interface Graded {
+  band: Band
+  /** 见 bandMargin */
+  margin: number
+  borderline: boolean
+  /** 置信度乘数：贴线时最低打七折 */
+  confFactor: number
+}
+
+/**
+ * 分档 + 判线余量，一次给全。
+ *
+ * 规则层应当用这个而不是裸 toBand —— 它顺带把「这一档到底判得稳不稳」
+ * 折进置信度里，贴线的项因此不会以十足的口气写进报告。
+ */
+export function grade(value: number, spec: BandSpec): Graded {
+  const margin = bandMargin(value, spec)
+  const borderline = margin < BORDERLINE_MARGIN
+  return {
+    band: toBand(value, spec),
+    margin: round(margin, 3),
+    borderline,
+    confFactor: borderline ? 0.7 + (0.3 * margin) / BORDERLINE_MARGIN : 1,
+  }
+}
+
+/** 贴线时追加到 evidence 末尾的实话 */
+export const BORDERLINE_NOTE = '（此项贴近分档判线，属两可之间，措辞已相应放软）'
+
+/**
+ * 给草稿特征套上判线余量的影响：压低置信度 + 在证据里说明。
+ *
+ * 规则层的 push 统一走这里，因此不存在「某一条忘了算余量」的可能。
+ * value 不是数字（分类项、比例字符串）或没给 spec 的，原样返回。
+ */
+export function applyMargin(draft: DraftFeature, spec?: BandSpec): DraftFeature {
+  if (!spec || typeof draft.value !== 'number') return draft
+  const g = grade(draft.value, spec)
+  if (!g.borderline) return draft
+  return {
+    ...draft,
+    confidence: round(draft.confidence * g.confFactor),
+    evidence: draft.evidence + BORDERLINE_NOTE,
+  }
+}
+
+/**
  * band → 评分权重。
  * ⚠️ very_high 低于 high 是刻意的：过盛在传统相术里反而减分。
  */
