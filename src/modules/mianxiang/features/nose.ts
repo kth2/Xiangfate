@@ -35,7 +35,9 @@ const SPECS: FeatureSpec[] = [
   },
   {
     id: 'face3d.nose.rootDepth',
-    label: '山根隆起',
+    // ⚠️ 不叫「山根隆起」——那是断语用词，而这是个**有符号**的量，
+    // 低陷时为负。叫成断语名既不准，又会与 verdicts 的表撞键
+    label: '山根前突量',
     category: '鼻',
     unit: 'iod',
     method: 'shading',
