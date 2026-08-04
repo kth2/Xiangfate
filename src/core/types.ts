@@ -6,7 +6,16 @@
  * ⚠️ 本文件属于 src/core，不得 import React 或触碰 DOM —— 迁移 RN/Flutter 时要整体复用。
  */
 
-export const SCHEMA_VERSION = '1.0.0' as const
+/**
+ * 2.0.0：新增 3D 特征管线（规范帧 + 五岳 + 十二宫统计 + 三维对称）。
+ *
+ * 向后兼容 —— 新增的都是**可选**字段，1.0.0 的信封（IndexedDB 里的旧历史记录）
+ * 仍然满足 2.0 的 schema，读出来照常渲染。校验器同时接受两个版本号。
+ */
+export const SCHEMA_VERSION = '2.0.0' as const
+
+/** 校验器接受的历史版本 */
+export const SUPPORTED_SCHEMA_VERSIONS = ['1.0.0', '2.0.0'] as const
 
 export type AnalysisType = 'mianxiang' | 'shouxiang' | 'guxiang' | 'tixiang'
 
@@ -14,6 +23,16 @@ export type Band = 'very_low' | 'low' | 'balanced' | 'high' | 'very_high' | 'cat
 
 /** 特征来源。unavailable 的项不进 features，而进 unavailable 数组。 */
 export type FeatureStatus = 'measured' | 'inferred' | 'self_reported'
+
+/**
+ * 测量单位（schema 2.0 新增）。
+ * iod   —— 以双眼外眦距离为单位的长度，与拍摄距离无关
+ * ratio —— 两个同量纲量之比
+ * deg   —— 角度
+ * score —— 归一到 0–1 的合成分
+ * none  —— 分类项，无量纲
+ */
+export type FeatureUnit = 'iod' | 'ratio' | 'deg' | 'score' | 'none'
 
 export type UnavailableReason =
   | 'not_observable' // 任何照片都拍不到（枕骨、顶骨、耳后骨）
@@ -43,7 +62,7 @@ export type Classic =
 
 export type FeatureCategory =
   // 面相
-  | '三停' | '五眼' | '眉' | '眼' | '鼻' | '口' | '耳' | '十二宫' | '气色' | '五形' | '脸型' | '对称' | '纹痣'
+  | '三停' | '五眼' | '眉' | '眼' | '鼻' | '口' | '耳' | '十二宫' | '气色' | '五形' | '脸型' | '对称' | '纹痣' | '五岳'
   // 手相
   | '手型' | '指形' | '掌线' | '掌丘' | '掌色' | '左右手'
   // 骨相
@@ -62,6 +81,8 @@ export interface FeatureItem {
   status: FeatureStatus
   /** [0.35, 1]。低于 0.35 会被降级到 unavailable */
   confidence: number
+  /** 测量单位。schema 2.0 新增，1.0 的旧记录没有这个字段 */
+  unit?: FeatureUnit
   /** 必须含具体数值，供 AI 引用与用户核对 */
   evidence: string
   /** 已过 docs/07 内容策略的释义要点 */
@@ -159,9 +180,13 @@ export interface AnalysisEnvelope {
    各类型的 derived
    ============================================================ */
 
+/**
+ * 十二宫。⚠️ schema 2.0 补上了**夫妻宫（奸门）**——
+ * 它是正典十二宫之一，原表却漏了，于是「十二宫」实际只有十一宫。
+ */
 export type Palace =
   | '命宫' | '财帛宫' | '兄弟宫' | '田宅宫' | '男女宫' | '疾厄宫'
-  | '迁移宫' | '奴仆宫' | '官禄宫' | '福德宫' | '相貌宫' | '父母宫'
+  | '夫妻宫' | '迁移宫' | '奴仆宫' | '官禄宫' | '福德宫' | '相貌宫' | '父母宫'
 
 export type FiveElement = '金' | '木' | '水' | '火' | '土'
 export type FaceShape = '圆脸' | '瓜子脸' | '由字脸' | '国字脸' | '甲字脸'

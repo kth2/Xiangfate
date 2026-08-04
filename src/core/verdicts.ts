@@ -103,10 +103,25 @@ const TABLE: Record<string, Entry> = {
 /** 痣是按位置断的，label 是动态拼的（「印堂、颧见痣」），单独走前缀匹配 */
 const MOLE_SUFFIX = '见痣'
 
+/**
+ * 3D 特征一律不产生断语。
+ *
+ * 这条必须是**结构性**的，不能靠「名字碰巧不一样」——
+ * 实际就出过事：face3d.nose.rootDepth 的 label 是「山根隆起」，
+ * 与断语表的键撞名，于是每张脸都无条件拿到一条贵格断语，
+ * 而那一项的实测值可能是负的（山根低陷）。
+ *
+ * 3D 项的阈值尚未用真实人群校准，在校准之前它们只能作为数值依据，
+ * 不能下判断。见 docs/02 第 0.5 节。
+ */
+const isMeasurementOnly = (id: string): boolean => id.startsWith('face3d.')
+
 export function collectVerdicts(features: FeatureItem[]): Verdict[] {
   const out: Verdict[] = []
 
   for (const f of features) {
+    if (isMeasurementOnly(f.id)) continue
+
     if (f.label.endsWith(MOLE_SUFFIX) && f.label !== '面上无显痣') {
       out.push({
         name: f.label,

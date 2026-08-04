@@ -12,6 +12,7 @@ import { fileURLToPath, URL } from 'node:url'
 import {
   DEFAULT_FORBID_TOPICS,
   SCHEMA_VERSION,
+  SUPPORTED_SCHEMA_VERSIONS,
   type AnalysisEnvelope,
   type MianxiangDerived,
 } from '../types'
@@ -152,6 +153,51 @@ describe('JSON Schema', () => {
       features: [{ ...envelope.features[0], status: 'unavailable' }],
     }
     expect(validate(bad)).toBe(false)
+  })
+
+  /* ---- schema 2.0 的向后兼容 ---- */
+
+  it('1.0.0 的旧信封仍然通过 —— IndexedDB 里的历史记录不能因为升级而读不出来', () => {
+    const validate = validator(ENVELOPE)
+    const v1 = {
+      ...envelope,
+      schemaVersion: '1.0.0',
+      // 1.0 的 feature 没有 unit 字段
+      features: envelope.features.map((f) => {
+        const { unit: _drop, ...rest } = f as typeof f & { unit?: string }
+        return rest
+      }),
+    }
+    const ok = validate(v1)
+    if (!ok) console.error(validate.errors)
+    expect(ok).toBe(true)
+  })
+
+  it('2.0 的 unit 字段被接受，且只认已定义的单位', () => {
+    const validate = validator(ENVELOPE)
+    const withUnit = {
+      ...envelope,
+      features: [{ ...envelope.features[0], unit: 'iod' }],
+    }
+    expect(validate(withUnit)).toBe(true)
+
+    const bogus = {
+      ...envelope,
+      features: [{ ...envelope.features[0], unit: '厘米' }],
+    }
+    expect(validate(bogus)).toBe(false)
+  })
+
+  it('拒绝未来的版本号 —— 校验器只认它确实支持的那几个', () => {
+    const validate = validator(ENVELOPE)
+    expect(validate({ ...envelope, schemaVersion: '3.0.0' })).toBe(false)
+  })
+
+  it('SUPPORTED_SCHEMA_VERSIONS 与 schema 的 enum 一致', () => {
+    const raw = JSON.parse(
+      readFileSync(fileURLToPath(new URL(`../../../schemas/${ENVELOPE}`, import.meta.url)), 'utf8'),
+    ) as { properties: { schemaVersion: { enum: string[] } } }
+    expect([...raw.properties.schemaVersion.enum].sort()).toEqual([...SUPPORTED_SCHEMA_VERSIONS].sort())
   })
 })
 
