@@ -15,6 +15,10 @@ const Report = lazy(() => import('./ui/pages/Report').then((m) => ({ default: m.
 const History = lazy(() => import('./ui/pages/History').then((m) => ({ default: m.History })))
 const Settings = lazy(() => import('./ui/pages/Settings').then((m) => ({ default: m.Settings })))
 const About = lazy(() => import('./ui/pages/About').then((m) => ({ default: m.About })))
+// 开发用验证台。不在任何界面里链接，lazy 引入所以不进主包
+const DevValidate = lazy(() =>
+  import('./ui/pages/DevValidate').then((m) => ({ default: m.DevValidate })),
+)
 
 const withSuspense = (node: React.ReactNode) => <Suspense fallback={<Loading />}>{node}</Suspense>
 
@@ -29,6 +33,7 @@ export const router = createBrowserRouter([
       { path: 'history', element: withSuspense(<History />) },
       { path: 'settings', element: withSuspense(<Settings />) },
       { path: 'about', element: withSuspense(<About />) },
+      { path: 'dev/validate', element: withSuspense(<DevValidate />) },
       { path: '*', element: <Home /> },
     ],
   },
