@@ -3,7 +3,7 @@
  * 这是「确定性的归代码」那一半的终点 —— 出口就是发给 AI 的那份 JSON。
  */
 
-import { round } from '@/core/band'
+import { partitionByConfidence, round } from '@/core/band'
 import { analyzeComplexion } from '@/core/color'
 import { assessQuality } from '@/core/quality'
 import { computeScorecard } from '@/core/scorecard'
@@ -18,6 +18,7 @@ import { medianOfSamples, stabilityOf } from '@/core/frames'
 import { toImageData } from '@/core/image'
 import { eulerFromMatrix, type DetectResult } from '@/mediapipe/detect'
 import { COMPLEXION_REGIONS } from './landmarks'
+import { computeFace3DFeatures } from './features'
 import { detectMoles, measureEyeBag, measureNasolabial } from './marks'
 import { browDensity, browTailDispersion, computeFaceMetrics } from './metrics'
 import { applyFaceRules } from './rules'
@@ -111,6 +112,20 @@ export function buildMianxiangEnvelope({
       }
     : null
 
+  /*
+   * 3D 特征管线（schema 2.0）。
+   * 与既有的二维规则**并行**产出，不替换 —— 旧特征的 id、阈值、断语全部不动，
+   * 因此这次升级对报告与历史记录都是纯增量。
+   */
+  const face3d = computeFace3DFeatures({
+    landmarks,
+    imgWidth: bitmap.width,
+    imgHeight: bitmap.height,
+    transformMatrix,
+    qualityFactor,
+    detectorScore: effectiveScore,
+  })
+
   const { features, unavailable, derived } = applyFaceRules({
     m,
     qualityFactor,
@@ -124,6 +139,9 @@ export function buildMianxiangEnvelope({
     nasolabial,
   })
 
+  // 3D 项同样要过置信度门槛，走同一个分流入口
+  const partitioned3d = partitionByConfidence(face3d.features)
+
   return {
     schemaVersion: SCHEMA_VERSION,
     analysisType: 'mianxiang',
@@ -132,7 +150,7 @@ export function buildMianxiangEnvelope({
     locale: 'zh-CN',
     ...(subject ? { subject } : {}),
     capture: { shots: ['front'], quality },
-    features,
+    features: [...features, ...partitioned3d.features],
     derived,
     raw: {
       normalizer: { type: 'IOD', valuePx: round(m.iodPx, 1) },
@@ -166,6 +184,7 @@ export function buildMianxiangEnvelope({
             }
           : {}),
         ...(moles && !moles.failed ? { 检出痣数: moles.moles.length } : {}),
+        ...face3d.diagnostics,
         ...(stability.frames > 1
           ? {
               连拍帧数: stability.frames,
@@ -184,7 +203,8 @@ export function buildMianxiangEnvelope({
           }
         : {}),
     },
-    unavailable,
+    unavailable: [...unavailable, ...partitioned3d.unavailable],
+    // 星级仍只由二维规则算 —— 3D 项还没有校准过的阈值，不该参与打分
     scorecard: computeScorecard(features),
     policy: { disclaimerRequired: true, forbidTopics: [...DEFAULT_FORBID_TOPICS] },
   }
