@@ -2,6 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { getTypeSpec, isAnalysisType, type ShotSpec } from '@/core/registry'
 import { captureVideoBurst, loadImageFile } from '@/core/image'
+import {
+  cameraErrorMessage,
+  cameraUnavailableReason,
+  openCameraStream,
+  READY_TIMEOUT_MS,
+  waitForVideoReady,
+} from '@/core/camera'
 import { formatMb, totalBytes } from '@/mediapipe/loader'
 import { detect, eulerFromMatrix, NoSubjectError, type DetectResult } from '@/mediapipe/detect'
 import { buildMianxiangEnvelope } from '@/modules/mianxiang/pipeline'
@@ -64,6 +71,8 @@ export function Capture() {
   const [preview, setPreview] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [cameraOn, setCameraOn] = useState(false)
+  /** 流接上 ≠ 有画面。videoWidth 要到 loadedmetadata 才非零，在那之前不能让人按快门 */
+  const [cameraReady, setCameraReady] = useState(false)
   const [palm, setPalm] = useState<PalmAnalysis | null>(null)
   const [palmMissing, setPalmMissing] = useState<PalmLineName[]>([])
 
@@ -84,6 +93,7 @@ export function Capture() {
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
     setCameraOn(false)
+    setCameraReady(false)
   }, [])
 
   // 离开页面时释放所有位图 —— 它们绝不进入任何持久化
@@ -108,6 +118,43 @@ export function Capture() {
     [result],
   )
 
+  /*
+   * 把相机流接到 <video> 上 —— 必须在 effect 里做。
+   *
+   * 原先是在 openCamera 里 setCameraOn(true) 之后用 queueMicrotask 接的，
+   * 而 React 的渲染排在宏任务，微任务一定跑在提交之前：videoRef.current 恒为 null，
+   * srcObject 从来没被赋值。表现就是相机灯亮着、画面全黑，
+   * 一按快门 videoWidth 还是 0，报「相机还没准备好」。effect 在提交之后跑，没有这个窗口。
+   *
+   * 接上之后还要等 loadedmetadata —— 在那之前 videoWidth 同样是 0，
+   * 快门按钮因此要等到 cameraReady 才放开。
+   */
+  useEffect(() => {
+    const v = videoRef.current
+    const stream = streamRef.current
+    if (!cameraOn || !v || !stream) return
+
+    v.srcObject = stream
+    const ac = new AbortController()
+    // 自动播放被拦也不直接报错：下面的等待会超时兜底，措辞比 play() 的原始异常好懂
+    void v.play().catch(() => {})
+
+    waitForVideoReady(v, READY_TIMEOUT_MS, ac.signal).then(
+      (ok) => {
+        if (ok) setCameraReady(true)
+      },
+      (err: unknown) => {
+        setError(cameraErrorMessage(err))
+        stopCamera()
+      },
+    )
+
+    return () => {
+      ac.abort()
+      v.srcObject = null
+    }
+  }, [cameraOn, stopCamera])
+
   if (!spec) {
     return (
       <div className="page px-6 pt-16">
@@ -121,22 +168,19 @@ export function Capture() {
 
   async function openCamera() {
     setError(null)
+    const blocked = cameraUnavailableReason()
+    if (blocked) {
+      setError(blocked)
+      return
+    }
     try {
       const facing = spec!.type === 'tixiang' ? 'environment' : 'user'
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1920 } },
-        audio: false,
-      })
-      streamRef.current = stream
+      // 先拿到流，再让 <video> 挂出来；接流交给下面那个 effect，
+      // 因为只有 effect 能保证 DOM 已经提交完毕。
+      streamRef.current = await openCameraStream(facing)
       setCameraOn(true)
-      queueMicrotask(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          void videoRef.current.play()
-        }
-      })
-    } catch {
-      setError('没有相机权限也可以，从相册选一张就行')
+    } catch (err) {
+      setError(cameraErrorMessage(err))
     }
   }
 
@@ -206,7 +250,7 @@ export function Capture() {
   }
 
   async function onShutter() {
-    if (!videoRef.current) return
+    if (!videoRef.current || !cameraReady) return
     try {
       // 连拍：同机位同角度取几帧，几何量取中位数，抖动本身用来折算置信度。
       // 详见 core/frames.ts。相册上传没有这个条件，走单帧路径。
@@ -575,8 +619,13 @@ export function Capture() {
 
       <div className="mt-auto flex flex-col gap-3">
         {cameraOn ? (
-          <button type="button" onClick={() => void onShutter()} className="btn-seal h-12 w-full text-[15px]">
-            拍摄
+          <button
+            type="button"
+            disabled={!cameraReady}
+            onClick={() => void onShutter()}
+            className="btn-seal h-12 w-full text-[15px] disabled:opacity-50"
+          >
+            {cameraReady ? '拍摄' : '相机启动中…'}
           </button>
         ) : (
           <button type="button" onClick={() => void openCamera()} className="btn-seal h-12 w-full text-[15px]">
