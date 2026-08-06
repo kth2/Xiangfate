@@ -5,9 +5,14 @@ import { captureVideoBurst, loadImageFile } from '@/core/image'
 import {
   cameraErrorMessage,
   cameraUnavailableReason,
+  countVideoInputs,
+  mirrorFor,
   openCameraStream,
+  otherFacing,
   READY_TIMEOUT_MS,
+  shouldOfferFlip,
   waitForVideoReady,
+  type Facing,
 } from '@/core/camera'
 import { formatMb, totalBytes } from '@/mediapipe/loader'
 import { detect, eulerFromMatrix, NoSubjectError, type DetectResult } from '@/mediapipe/detect'
@@ -73,6 +78,14 @@ export function Capture() {
   const [cameraOn, setCameraOn] = useState(false)
   /** 流接上 ≠ 有画面。videoWidth 要到 loadedmetadata 才非零，在那之前不能让人按快门 */
   const [cameraReady, setCameraReady] = useState(false)
+  /**
+   * 只是默认值，不是限制 —— 体相多半要别人帮忙拍或架起来，默认后摄；
+   * 其余对着自己拍，默认前摄。两者都可以当场翻转。
+   */
+  const [facing, setFacing] = useState<Facing>(spec?.type === 'tixiang' ? 'environment' : 'user')
+  const [canFlip, setCanFlip] = useState(false)
+  /** 换了流就 +1，effect 靠它重新接线；不用 facing 当依赖，免得和「同朝向重开」耦合 */
+  const [streamKey, setStreamKey] = useState(0)
   const [palm, setPalm] = useState<PalmAnalysis | null>(null)
   const [palmMissing, setPalmMissing] = useState<PalmLineName[]>([])
 
@@ -153,7 +166,7 @@ export function Capture() {
       ac.abort()
       v.srcObject = null
     }
-  }, [cameraOn, stopCamera])
+  }, [cameraOn, streamKey, stopCamera])
 
   if (!spec) {
     return (
@@ -174,14 +187,45 @@ export function Capture() {
       return
     }
     try {
-      const facing = spec!.type === 'tixiang' ? 'environment' : 'user'
-      // 先拿到流，再让 <video> 挂出来；接流交给下面那个 effect，
+      // 先拿到流，再让 <video> 挂出来；接流交给上面那个 effect，
       // 因为只有 effect 能保证 DOM 已经提交完毕。
       streamRef.current = await openCameraStream(facing)
+      setStreamKey((k) => k + 1)
       setCameraOn(true)
+      // 摄像头数量要在拿到权限之后才问得准，未授权时部分浏览器只报一路
+      void countVideoInputs().then((n) => setCanFlip(shouldOfferFlip(n)))
     } catch (err) {
       setError(cameraErrorMessage(err))
     }
+  }
+
+  /**
+   * 前后摄切换。
+   *
+   * 必须先停掉旧流再开新流 —— 多数手机不允许同时占用两路摄像头，
+   * 边开边关会直接 NotReadableError。代价是中间有个空窗，
+   * 所以新朝向开不起来时要退回原朝向，不能把用户丢在没有相机的状态里。
+   */
+  async function flipCamera() {
+    const next = otherFacing(facing)
+    setError(null)
+    setCameraReady(false)
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
+
+    for (const target of [next, facing]) {
+      try {
+        streamRef.current = await openCameraStream(target)
+        setFacing(target)
+        setStreamKey((k) => k + 1)
+        if (target !== next) setError('这台设备切不到另一个摄像头，已切回原来那个')
+        return
+      } catch {
+        /* 退回原朝向再试一次 */
+      }
+    }
+    setError('摄像头切换失败，重新打开相机试试，或者从相册选一张')
+    stopCamera()
   }
 
   async function runDetection(
@@ -601,8 +645,21 @@ export function Capture() {
             playsInline
             muted
             className="block w-full"
-            style={{ transform: spec.type === 'tixiang' ? 'none' : 'scaleX(-1)' }}
+            /* 镜像只作用于取景。drawImage 不受 CSS 变换影响，拍下来的仍是未镜像的原图 */
+            style={{ transform: mirrorFor(facing) }}
           />
+          {canFlip && (
+            <button
+              type="button"
+              onClick={() => void flipCamera()}
+              aria-label={facing === 'user' ? '切换到后置摄像头' : '切换到前置摄像头'}
+              className="absolute top-3 right-3 flex h-10 items-center gap-1.5 rounded-full px-3.5 text-[12px] backdrop-blur-sm"
+              style={{ background: 'rgba(0,0,0,0.45)', color: '#fff' }}
+            >
+              <span aria-hidden>⇄</span>
+              {facing === 'user' ? '前置' : '后置'}
+            </button>
+          )}
         </div>
       )}
 

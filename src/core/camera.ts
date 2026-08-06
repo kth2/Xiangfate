@@ -146,6 +146,40 @@ export function fallbackConstraints(facing: Facing): MediaStreamConstraints {
   return { video: { facingMode: facing }, audio: false }
 }
 
+export function otherFacing(f: Facing): Facing {
+  return f === 'user' ? 'environment' : 'user'
+}
+
+/**
+ * 有几路摄像头。问不出来时返回 0（不支持 enumerateDevices，或调用被拒）。
+ *
+ * 注意要在拿到权限之后再问：未授权时部分浏览器只报一路，或者干脆给空列表。
+ */
+export async function countVideoInputs(nav = globalThis.navigator): Promise<number> {
+  try {
+    if (!nav?.mediaDevices?.enumerateDevices) return 0
+    const devices = await nav.mediaDevices.enumerateDevices()
+    return devices.filter((d) => d.kind === 'videoinput').length
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * 要不要给出「翻转」按钮。
+ *
+ * 恰好一路时才隐藏。**0 表示问不出来，此时宁可显示** ——
+ * 按了切不过去只是一句错误提示，而少给这个按钮在双摄手机上就是功能缺失。
+ */
+export function shouldOfferFlip(videoInputCount: number): boolean {
+  return videoInputCount !== 1
+}
+
+/** 前摄要镜像（自拍看着才自然），后摄不能镜像。这只影响取景预览，不影响拍下来的图 */
+export function mirrorFor(facing: Facing): string {
+  return facing === 'user' ? 'scaleX(-1)' : 'none'
+}
+
 type GetMedia = (c: MediaStreamConstraints) => Promise<MediaStream>
 
 /**
