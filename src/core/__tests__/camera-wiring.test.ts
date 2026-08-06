@@ -61,4 +61,19 @@ describe('Capture.tsx 的相机接线', () => {
     expect(src).toContain('cameraUnavailableReason')
     expect(src).toContain('cameraErrorMessage')
   })
+
+  it('镜像跟着当前朝向走，而不是跟着相术类型写死', () => {
+    expect(src).toContain('mirrorFor(facing)')
+    // 原先是 spec.type === 'tixiang' ? 'none' : 'scaleX(-1)'，后摄一翻就拍反了
+    expect(src).not.toMatch(/transform:\s*spec\.type/)
+  })
+
+  it('切换前先停掉旧流 —— 多数手机不许同时占两路摄像头', () => {
+    const flip = src.slice(src.indexOf('async function flipCamera'))
+    const stop = flip.indexOf('getTracks()')
+    const open = flip.indexOf('openCameraStream')
+    expect(stop, '没找到停流').toBeGreaterThan(-1)
+    expect(open, '没找到开流').toBeGreaterThan(-1)
+    expect(stop, '停流必须排在开流之前').toBeLessThan(open)
+  })
 })

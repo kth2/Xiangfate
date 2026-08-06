@@ -12,9 +12,13 @@ import {
   cameraErrorMessage,
   cameraUnavailableReason,
   constraintsFor,
+  countVideoInputs,
   fallbackConstraints,
   isVideoReady,
+  mirrorFor,
   openCameraStream,
+  otherFacing,
+  shouldOfferFlip,
   READY_TIMEOUT_MS,
   waitForVideoReady,
   type VideoLike,
@@ -188,6 +192,57 @@ describe('cameraErrorMessage', () => {
 
   it('超时错保留自己的原文', () => {
     expect(cameraErrorMessage(new CameraTimeoutError())).toContain('迟迟没有画面')
+  })
+})
+
+describe('前后摄切换', () => {
+  it('otherFacing 来回切', () => {
+    expect(otherFacing('user')).toBe('environment')
+    expect(otherFacing('environment')).toBe('user')
+  })
+
+  it('恰好一路摄像头时不给翻转按钮', () => {
+    expect(shouldOfferFlip(1)).toBe(false)
+  })
+
+  it('两路及以上给', () => {
+    expect(shouldOfferFlip(2)).toBe(true)
+    expect(shouldOfferFlip(3)).toBe(true)
+  })
+
+  it('问不出来（0）时也给 —— 少给按钮是功能缺失，多给只是一句错误提示', () => {
+    expect(shouldOfferFlip(0)).toBe(true)
+  })
+
+  it('只有前摄要镜像 —— 后摄镜像会让人拍反', () => {
+    expect(mirrorFor('user')).toBe('scaleX(-1)')
+    expect(mirrorFor('environment')).toBe('none')
+  })
+
+  it('countVideoInputs 只数 videoinput', async () => {
+    const nav = {
+      mediaDevices: {
+        enumerateDevices: async () => [
+          { kind: 'videoinput' },
+          { kind: 'audioinput' },
+          { kind: 'videoinput' },
+          { kind: 'audiooutput' },
+        ],
+      },
+    } as never
+    expect(await countVideoInputs(nav)).toBe(2)
+  })
+
+  it('enumerateDevices 不存在或抛错时返回 0，而不是让调用方炸掉', async () => {
+    expect(await countVideoInputs(undefined as never)).toBe(0)
+    const nav = {
+      mediaDevices: {
+        enumerateDevices: async () => {
+          throw new Error('denied')
+        },
+      },
+    } as never
+    expect(await countVideoInputs(nav)).toBe(0)
   })
 })
 
