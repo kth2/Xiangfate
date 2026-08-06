@@ -6,6 +6,8 @@
  * 任何可导出的内存对象。剥离方式是重绘到 canvas：canvas 输出天然不含 EXIF。
  */
 
+import { isVideoReady } from './camera'
+
 /** 长边上限。保证检测精度的同时控制内存（4000px 的原图解码要 60MB+） */
 export const MAX_EDGE = 1920
 
@@ -67,7 +69,9 @@ export async function captureVideoBurst(
 ): Promise<{ bitmaps: ImageBitmap[]; previewUrl: string; width: number; height: number }> {
   const sw = video.videoWidth
   const sh = video.videoHeight
-  if (!sw || !sh) throw new Error('相机还没准备好')
+  // 正常情况下按钮会等到 cameraReady 才放开，走不到这里；留着是防御，
+  // 措辞也给成能照做的一句，而不是一句状态描述。
+  if (!isVideoReady(video)) throw new Error('相机画面还没出来，稍等一秒再按，或者从相册选一张')
 
   const scale = Math.min(1, MAX_EDGE / Math.max(sw, sh))
   const width = Math.round(sw * scale)
