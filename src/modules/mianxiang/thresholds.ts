@@ -187,6 +187,21 @@ export const T = {
   philtrumLong: 0.163,
   philtrumShort: 0.133,
 
+  /**
+   * 下颌角判线（度，越小越方硬）。
+   *
+   * 与骨相的 `guxiang/thresholds.ts` 里 gonialSquare / gonialSoft **是同一对数**，
+   * 因为量的是同一个角：`angleAt(颧, 颌角, 下巴尖)`，两侧取平均。
+   * 之所以在这里再写一遍而不是 import —— guxiang 已经 import 了 mianxiang/landmarks，
+   * 反向再引会成环。`__tests__/thresholds-sync.test.ts` 钉住两边相等，不会各走各的。
+   *
+   * ⚠️ 这两条线本身仍是工程判断（骨相那边就没标校准来源），但它是**既有的**判断：
+   * 三维那边原来另拍了一个 90°/160° 的区间，实测两张脸都挤在 0.21–0.28，
+   * 刻度七十度的跨度里只用得到两成。改为沿用这一对，至少两处口径一致。
+   */
+  gonialSquare: 125,
+  gonialSoft: 145,
+
   /** 对称性 */
   symmetryTol: 0.08,
   symmetryGood: 0.85,

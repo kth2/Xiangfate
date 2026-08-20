@@ -6,7 +6,7 @@
  * 那受光照影响极大；这里给一个纯几何的、与光照无关的代理，两者互为参照。
  *
  * 三个代理量：
- *   · jawAngularity  下颌轮廓的转折锐度 —— 骨感的脸转折硬，肉感的脸转折圆
+ *   · jawAngularity  下颌角（颧→颌角→下巴尖）的方硬程度 —— 骨感的脸转折硬，肉感的脸转折圆
  *   · cheekFullness  颊部中段相对自身上下缘连线的矢高 —— 鼓即有肉，凹即见骨
  *   · boneFleshIndex 两者合成，高 = 骨多肉少
  *
@@ -15,14 +15,25 @@
  */
 
 import { dot3, norm3, sub3 } from '@/core/vec3'
-import { CHEEK_COLUMN, GONION, JAW_MID, ZYGOMATIC, CHIN_SIDE } from '../landmarks'
+import { CHEEK_COLUMN, CHIN_BOTTOM, GONION, ZYGOMATIC } from '../landmarks'
+import { T } from '../thresholds'
 import { prominence, type FaceFrame } from '../normalize'
 import { pctStr, round3, type FeatureModule, type FeatureSpec, type Measurement } from './types'
 
-/** 下颌轮廓：颧 → 下颌角 → 颌中 → 颏侧，两侧各取一串 */
-const JAW_CHAIN = {
-  left: [ZYGOMATIC.left, GONION.left, JAW_MID.left, CHIN_SIDE.left],
-  right: [ZYGOMATIC.right, GONION.right, JAW_MID.right, CHIN_SIDE.right],
+/**
+ * 下颌角的取样三点：颧 → 下颌角 → 下巴尖，两侧各一组。
+ *
+ * ⚠️ 第三点从「颌中」改成了「下巴尖」，与 metrics.ts 的 contour.gonialAngle
+ * 以及骨相的 gonialAngle 用同一个定义 —— 原来那组量出来平约 9°
+ * （实测 145°/140° 对 134°/132°），是三处里唯一不一样的一处，
+ * 判线自然也就没法互通。改齐之后，骨相已有的 gonialSquare/gonialSoft 可以直接沿用。
+ *
+ * 顺带清掉一处死代码：原 JAW_CHAIN 声明了四个点，而求角只用到前三个，
+ * 第四个（颏侧）从来没被读过。
+ */
+const JAW_ANGLE_POINTS = {
+  left: [ZYGOMATIC.left, GONION.left, CHIN_BOTTOM],
+  right: [ZYGOMATIC.right, GONION.right, CHIN_BOTTOM],
 } as const
 
 const SPECS: FeatureSpec[] = [
@@ -68,9 +79,17 @@ export const boneFleshModule: FeatureModule = {
       const cos = Math.max(-1, Math.min(1, dot3(a, b)))
       return (Math.acos(cos) * 180) / Math.PI
     }
-    const gonialAngle = (angleAtGonion(JAW_CHAIN.left) + angleAtGonion(JAW_CHAIN.right)) / 2
-    // 90° 视为极方硬、160° 视为极圆润，中间线性
-    const angularity = clamp01((160 - gonialAngle) / 70)
+    const gonialAngle =
+      (angleAtGonion(JAW_ANGLE_POINTS.left) + angleAtGonion(JAW_ANGLE_POINTS.right)) / 2
+    /**
+     * 映射沿用既有判线：≤125° 记满（方硬），≥145° 记 0（圆润），中间线性。
+     *
+     * 原来写的是 (160 − x)/70，即 90°–160° 的跨度。那对区间是另拍的：
+     * 实测两张脸落在 0.213 / 0.281，七十度的刻度只用得到最下面两成，
+     * 骨肉指数因此被系统性拉低。现在用的这一对来自骨相 T.gonialSquare/gonialSoft，
+     * 是项目里已经在用的判断，不是为了让某张脸好看而挑的数。
+     */
+    const angularity = clamp01((T.gonialSoft - gonialAngle) / (T.gonialSoft - T.gonialSquare))
 
     /* ---- 颊部外鼓：颊部自身的矢高 ----
      *
@@ -112,7 +131,7 @@ export const boneFleshModule: FeatureModule = {
       {
         specId: 'face3d.boneFlesh.jawAngularity',
         value: round3(angularity),
-        evidence: `下颌角实测 ${gonialAngle.toFixed(0)}°（越小越方硬）`,
+        evidence: `下颌角实测 ${gonialAngle.toFixed(0)}°（${T.gonialSquare}° 以下为方硬，${T.gonialSoft}° 以上为圆润）`,
       },
       {
         specId: 'face3d.boneFlesh.cheekFullness',
