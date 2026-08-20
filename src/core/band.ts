@@ -99,16 +99,46 @@ export function applyMargin(draft: DraftFeature, spec?: BandSpec): DraftFeature 
 }
 
 /**
- * band → 评分权重。
- * ⚠️ very_high 低于 high 是刻意的：过盛在传统相术里反而减分。
+ * band → 星级偏移量，**以「中和」为零点**的有符号量。
+ *
+ * ── 为什么改成有符号（2026-08）─────────────────────────────
+ * 原来这里是一张 0–1 的绝对分值表（very_low 0.1 … balanced 0.75 … high 0.9），
+ * 星级由 `1 + (ratio − 0.1) / 0.8 × 4` 换算。差异化审计量到的后果是：
+ * balanced 的 0.75 经这个式子正好落在 **4.25 星** ——
+ * 于是「各项都在中和区间」的人一律 4 星，而 1 星与 2 星从来没人拿到过。
+ * 五档的刻度实际只用得到中间三档，200 人里只有 19 种五维组合。
+ *
+ * 根子在于那张表把两件事混在一个数里：「这一项偏到哪个方向」与
+ * 「刻度的零点在哪」。现在分开 —— 零点固定在中和，各档只给相对它的偏移：
+ *
+ *   全部中和        → 偏移 0    → 3 星（刻度正中）
+ *   全部偏高（有余）→ 偏移 +1   → 5 星
+ *   全部显著偏低    → 偏移 −1   → 1 星
+ *   全部显著偏高    → 偏移 −0.4 → 2 星（过犹不及，见下）
+ *
+ * 这样五档全都够得到，而且星数有了可以说清的含义：
+ * **这一维读起来是「有余」还是「不足」**，中和即为常。
+ *
+ * ⚠️ very_high 记负值，且绝对值小于 low —— 传统相术「中和为贵、过犹不及」，
+ * 过盛是缺陷但通常轻于不足。UI 与 explainScorecard 把它标为 'excess' 而非
+ * 'down'，免得用户以为是测差了。
+ *
+ * ⚠️ categorical 不在这张表里，因为它**不在「有余/不足」这根轴上**：
+ * 水形之相、圆脸、方形手是「哪一类」而不是「多少」，拿五星刻度去量它是范畴错误。
+ * 这类特征照旧进报告、进提纲的显著度，只是不参与星级 —— 详见 core/scorecard.ts。
+ * ────────────────────────────────────────────────────────
  */
-export const BAND_VALUE: Record<Band, number> = {
-  very_low: 0.1,
-  low: 0.3,
-  balanced: 0.75,
-  high: 0.9,
-  very_high: 0.6,
-  categorical: 0.75,
+export const BAND_DELTA: Record<Exclude<Band, 'categorical'>, number> = {
+  very_low: -1,
+  low: -0.7,
+  balanced: 0,
+  high: 1,
+  very_high: -0.4,
+}
+
+/** 该档位是否参与星级计算 */
+export function isScoredBand(band: Band): band is Exclude<Band, 'categorical'> {
+  return band !== 'categorical'
 }
 
 /** 方法固有可靠度。几何测量最高，明暗/z 推导次之，气色最低。 */

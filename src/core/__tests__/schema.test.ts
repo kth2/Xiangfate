@@ -16,7 +16,7 @@ import {
   type AnalysisEnvelope,
   type MianxiangDerived,
 } from '../types'
-import { BAND_VALUE, MIN_CONFIDENCE, partitionByConfidence, toBand } from '../band'
+import { BAND_DELTA, MIN_CONFIDENCE, partitionByConfidence, toBand } from '../band'
 import { ALL_TYPES, TYPE_SPECS } from '../registry'
 
 function loadSchema(name: string) {
@@ -213,9 +213,19 @@ describe('分档与置信度', () => {
     expect(toBand(0.38, spec)).toBe('very_high')
   })
 
-  it('过盛减分：very_high 权重低于 high', () => {
-    expect(BAND_VALUE.very_high).toBeLessThan(BAND_VALUE.high)
-    expect(BAND_VALUE.balanced).toBeGreaterThan(BAND_VALUE.low)
+  it('星级偏移以中和为零点，且过盛计负 —— 过犹不及', () => {
+    // 中和是刻度零点：既不推高也不拉低
+    expect(BAND_DELTA.balanced).toBe(0)
+    // 有余为正，不足为负
+    expect(BAND_DELTA.high).toBeGreaterThan(0)
+    expect(BAND_DELTA.low).toBeLessThan(0)
+    expect(BAND_DELTA.very_low).toBeLessThan(BAND_DELTA.low)
+    // 过盛也计负，但轻于不足
+    expect(BAND_DELTA.very_high).toBeLessThan(0)
+    expect(Math.abs(BAND_DELTA.very_high)).toBeLessThan(Math.abs(BAND_DELTA.low))
+    // 满偏移正好够到刻度两端：3 ± 2×1 = 1 与 5
+    expect(BAND_DELTA.high).toBe(1)
+    expect(BAND_DELTA.very_low).toBe(-1)
   })
 
   it('低置信度特征被分流到 unavailable', () => {

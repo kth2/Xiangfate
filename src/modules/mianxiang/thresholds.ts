@@ -112,7 +112,7 @@ export const T = {
    * 于是判线整体偏低约 1.8 倍，后果不是「偏一点」而是：
    *     每一个人都落在 very_high → 一律「印堂开阔」，
    *     「印堂宽广」（贵格）与「印堂偏窄」（忌相）两条断语都永不命中，
-   *     且 very_high 在 BAND_VALUE 里按「过盛反损」记 0.6，
+   *     且 very_high 在星级里按「过盛反损」计负（core/band.ts 的 BAND_DELTA），
    *     于是每个人的「才智思辨」「气度格局」都被同一条错判压低。
    * 见 src/dev/__tests__/differentiation.test.ts。
    *

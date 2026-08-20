@@ -107,7 +107,11 @@ function syntheticPerson(base: FaceMetrics, seed: number): FaceMetrics {
     fiveEye: jit(base.fiveEye, L),
     innerGap: jit(base.innerGap, L),
     tianzhai: jit(base.tianzhai, S * 0.7),
-    symmetryScore: Math.min(1, base.symmetryScore * (1 - Math.abs(n()) * 0.06)),
+    // 对称度：以真人脸夹具的 0.85 为中心，而不是规范网格的 1.00 ——
+    // 后者是参考模型的产物，真实人脸从来不是严格左右对称的。
+    // 原来这里从 1.00 起扰动 6%，只有约 1% 的样本落到端正线以下，
+    // 于是「五官端正」在合成人群里几乎恒定，掩盖了它对星级的单向推力。
+    symmetryScore: Math.min(1, Math.max(0.6, 0.88 + n() * 0.06)),
     brow: { left: brow(base.brow.left), right: brow(base.brow.right) },
     eye: { left: eye(base.eye.left), right: eye(base.eye.right) },
     nose: {
@@ -208,10 +212,11 @@ describe('阈值带宽审计', () => {
 /**
  * 已知「对所有人给同一判断」的特征 —— 待校准的债，不是设计。
  *
- * · face.symmetry：判线 symmetryGood=0.85 之上只有一档，合成人群与真人脸
- *   都落在 high。真实人群的对称度应当更散，需要真实样本重定判线。
+ * 目前为空。face.symmetry 曾在这张表上：它原来只有 high / balanced 两种输出，
+ * 也就是只能给「端正」加分、从不减分，在星级里带权重 2 一路往上推。
+ * 现已改为 high / low 两档（见 mianxiang/rules.ts 的说明）。
  */
-const KNOWN_DEGENERATE = ['face.symmetry']
+const KNOWN_DEGENERATE: string[] = []
 
 describe('特征分档集中度', () => {
   const conc = featureConcentration(FEATURE_SETS)
@@ -337,11 +342,27 @@ describe('星级多样性', () => {
 
   it('五维组合的种类数不至于寥寥可数', () => {
     // 用户眼前看到的就是这张星级卡。理论上限 5^5 = 3125。
-    // 阈值收窄前只有 19 种，现在 34 种。仍然偏少，剩下的瓶颈是映射本身：
-    // BAND_VALUE.balanced = 0.75 经 (ratio-0.1)/0.8 映射后落在 4.25 星，
-    // 于是中和区里的人几乎一律 4 星 —— 这一项要改星级映射，不是改阈值。
-    // 钉住现状，只许上升。
-    expect(stats.distinctCards).toBeGreaterThanOrEqual(34)
+    // 三个阶段：起初 19 种（旧映射，balanced 恒落 4.25 星）→
+    // 阈值收窄后 34 种 → 星级映射重写后 110 种。钉住现状，只许上升。
+    expect(stats.distinctCards).toBeGreaterThanOrEqual(105)
+  })
+
+  it('五档星数都有人拿到 —— 旧映射下 1 星与 2 星从无人拿到', () => {
+    const seen = new Set<number>()
+    for (const dim of SCORE_DIMENSIONS) {
+      for (const [star, share] of stats.distribution[dim]) if (share > 0) seen.add(star)
+    }
+    say(`\n  人群中出现过的星数：${[...seen].sort().join('、')}`)
+    expect([...seen].sort()).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('没有哪一维把七成以上的人压在同一星数上', () => {
+    // 「执行意志」是目前最集中的一维（70%），来由不是映射而是权重表偏薄：
+    // face.nose.bridge 转为只报数后，纯面相且无像素输入时它几乎只剩
+    // face.nose.root 一条在撑。补权重表是另一件事，先钉住不许更差。
+    for (const dim of SCORE_DIMENSIONS) {
+      expect(stats.topShare[dim]).toBeLessThanOrEqual(0.7)
+    }
   })
 })
 

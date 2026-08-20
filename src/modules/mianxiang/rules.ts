@@ -416,13 +416,18 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
   /* ============ 对称 ============ */
   push(
     'face.symmetry', '对称',
-    m.symmetryScore >= T.symmetryGood ? '五官端正' : '五官各具其态',
-    m.symmetryScore >= T.symmetryGood ? 'high' : 'balanced',
+    m.symmetryScore >= T.symmetryGood ? '五官端正' : '五官偏侧',
+    // ⚠️ 低档给 'low' 而不是 'balanced'。原来是后者，于是这一项成了单向棘轮：
+    // 只能给「端正」加分，从不减分 —— 星级里它带权重 2，一律往上推，
+    // 实测让 39% 的人拿到 5 星「气度格局」。对称本身有高有低，档位就该有上有下。
+    // 顺带纠一处措辞：原释义「面部左右各有其势，个人特征鲜明」是把忌处写成好话，
+    // 与本项目「相书说得难听的地方照原意讲」的口径相违。
+    m.symmetryScore >= T.symmetryGood ? 'high' : 'low',
     round(m.symmetryScore), 'measured', conf('geometry'),
-    `${15} 组镜像点的中位偏差换算后，对称度为 ${(m.symmetryScore * 100).toFixed(0)}%`,
+    `${15} 组镜像点的中位偏差换算后，对称度为 ${(m.symmetryScore * 100).toFixed(0)}%（端正线为 ${(T.symmetryGood * 100).toFixed(0)}%）`,
     m.symmetryScore >= T.symmetryGood
       ? '相貌宫端正，与人相处给人稳定可靠之感'
-      : '面部左右各有其势，个人特征鲜明',
+      : '传统称五官偏侧，主心绪不齐、行事易有偏执，待人亦难一以贯之',
     '麻衣神相',
   )
 

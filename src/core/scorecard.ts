@@ -4,12 +4,36 @@
  * ⚠️ 刻意**不让 AI 生成**：同一张照片必须每次得到同样的星级。
  * 生成式模型做不到这一点，所以这件事归代码。
  *
- * 公式（docs/02 第五章）：
- *   dimensionScore = Σ(weight × bandValue × confidence) / Σ(weight × confidence)
- * 其中 bandValue 的 very_high 低于 high —— 传统相术「过犹不及」，过盛反而减分。
+ * ── 星级映射（2026-08 重写）──────────────────────────────
+ * 星数读作：**这一维读起来是「有余」还是「不足」**，中和即为常，落在正中的 3 星。
+ *
+ *   偏移 δ(d) = Σ(weight × BAND_DELTA[band] × confidence)
+ *              ────────────────────────────────────────    ∈ [−1, +1]
+ *                    Σ(weight × confidence)
+ *
+ *   证据量 E(d) = Σ(weight × confidence)
+ *   收缩后   δ' = δ × E / (E + PRIOR)
+ *   星级       = clamp(1, 5, round(3 + 2 × δ'))
+ *
+ * 两处求和都**只把偏离档计入**，中和项既不进分子也不进分母。
+ * 这一条是实测挑出来的：中和项若进分母，它们会把真正的偏离摊薄 ——
+ * 一条偏高配五条中和，δ 只剩 0.2，星数回到 3。实测 200 人只有 21 种五维组合，
+ * 比旧式子还差。中和的含义是「这一项没什么可说的」，
+ * 不该有把别处的发现拉回中间的力量。
+ *
+ * 三件事各由一处负责，不再混在一个数里：
+ *   · **方向与轻重** —— BAND_DELTA（core/band.ts），零点在中和
+ *   · **刻度零点**   —— 上式里的常数 3
+ *   · **证据够不够** —— 收缩项 E/(E+PRIOR)
+ *
+ * 旧式子是 `1 + (ratio − 0.1) / 0.8 × 4`，配 balanced=0.75 的绝对分值表，
+ * 结果「各项都中和」恒等于 4.25 星 → 一律 4 星，1 星与 2 星从无人拿到，
+ * 200 人只有 19 种五维组合。详见 core/band.ts 的 BAND_DELTA 注释与
+ * src/dev/__tests__/differentiation.test.ts。
+ * ────────────────────────────────────────────────────────
  */
 
-import { BAND_VALUE } from './band'
+import { BAND_DELTA, clamp, isScoredBand } from './band'
 import { isEvidenceOnly } from './evidenceOnly'
 import {
   SCORE_DIMENSIONS,
@@ -107,46 +131,105 @@ function weightsFor(id: string): Partial<Record<ScoreDimension, number>> | undef
   return best ? WEIGHTS[best] : undefined
 }
 
+/** 刻度正中 —— 中和即为常 */
+export const NEUTRAL_STARS = 3
+
 /**
- * 算五维星级。
- * 特征不足的维度回落到 3 星（中性），而不是 0 星 —— 没测到不等于差。
+ * 证据量的先验，单位与 E(d) 相同（权重 × 置信度）。
+ *
+ * 作用是「证据少就别把话说满」：一个维度只由一条 shading 类特征撑着时
+ * （E ≈ 1），它的偏移只按三成计入，星数留在 3 星附近；
+ * 有五六条实测特征支撑时（E ≈ 8）按八成计入，1 星与 5 星都够得到。
+ *
+ * 这一项同时替掉了原来 `den < 0.5 → 3 星` 那个硬台阶 ——
+ * 台阶两侧一边是 3 星、一边可能直接 5 星，差一条特征就能跳两星。
+ * 现在是连续的，但 MIN_EVIDENCE 之下仍然明确标 neutralFallback：
+ * 那种情况该告诉用户「本次没测到足够东西」，而不是给个看起来有依据的星数。
+ *
+ * 1.0 相当于「一条满权重、满置信度的偏离特征」。
+ * 这个值是在合成人群上比过几档定的：0（不收缩）会让只由一条特征撑着的维度
+ * 直接跳到 1 星或 5 星（实测「执行意志」出现 62% 3 星、25% 5 星而 4 星为空的断层）；
+ * 2.0 收得太狠，五档只用得到中间三档。1.0 两头都够得到，且没有断层。
+ * CALIBRATE —— 真实分布到手后应当按各维度的实际证据量分别定。
  */
-export function computeScorecard(features: FeatureItem[]): Scorecard {
-  const num: Record<ScoreDimension, number> = blank()
-  const den: Record<ScoreDimension, number> = blank()
+export const EVIDENCE_PRIOR = 1.0
+
+/** 低于此覆盖量就认为该维根本没测到，只报中性值并标记 neutralFallback */
+export const MIN_EVIDENCE = 0.5
+
+/** 某一维的偏移与证据量。computeScorecard 与 explainScorecard 共用，保证两边算法一致 */
+interface DimensionRaw {
+  /** Σ(weight × BAND_DELTA × confidence)，只累加偏离项 */
+  weighted: number
+  /** E(d) = Σ(weight × confidence)，只累加偏离项 —— 星级数学用这个 */
+  evidence: number
+  /**
+   * 所有参与打分的项（含中和项）的 Σ(weight × confidence)。
+   *
+   * 只用来回答一个问题：**这一维到底测到东西了没有。**
+   * 必须与 evidence 分开 —— 两种情况的星数都是 3，但要对用户说的话完全不同：
+   *   coverage 很低          → 「本次没测到足够特征」
+   *   coverage 够而 evidence 0 → 「各项均在中和区间」，这是结论，不是缺失
+   * 混用会让报告把「这个人各项都平实」说成「我们没测到」。
+   */
+  coverage: number
+}
+
+function accumulate(features: FeatureItem[]): Record<ScoreDimension, DimensionRaw> {
+  const acc = {} as Record<ScoreDimension, DimensionRaw>
+  for (const dim of SCORE_DIMENSIONS) acc[dim] = { weighted: 0, evidence: 0, coverage: 0 }
 
   for (const f of features) {
     // 判线站不住的项不进星级 —— 否则一条错判会把每个人的同一维度一起推高或压低
     if (isEvidenceOnly(f.id)) continue
+    // 分类项不在「有余/不足」这根轴上，完全不参与
+    // （见 core/band.ts 的 BAND_DELTA 注释）
+    if (!isScoredBand(f.band)) continue
     const w = weightsFor(f.id)
     if (!w) continue
-    const v = BAND_VALUE[f.band]
+    const delta = BAND_DELTA[f.band]
     for (const [dim, weight] of Object.entries(w) as [ScoreDimension, number][]) {
-      num[dim] += weight * v * f.confidence
-      den[dim] += weight * f.confidence
+      const wc = weight * f.confidence
+      acc[dim].coverage += wc
+      // 中和项只算「测到了」，不进星级数学 —— 否则它们把真正的偏离摊薄
+      if (delta === 0) continue
+      acc[dim].weighted += delta * wc
+      acc[dim].evidence += wc
     }
   }
+  return acc
+}
 
+/** 该维是否根本没测到东西（区别于「测到了，但各项都在中和区间」） */
+function isNeutralFallback(raw: DimensionRaw): boolean {
+  return raw.coverage < MIN_EVIDENCE
+}
+
+/** 把一维的原始量换算成星级。两个入口都走这里，不许各算各的 */
+function starsOf(raw: DimensionRaw): number {
+  // 没测到东西的维度回落到中性，而不是 1 星 —— 没测到不等于差
+  if (isNeutralFallback(raw)) return NEUTRAL_STARS
+  // 测到了但一项都不偏离 → 偏移为 0 → 正好 3 星。这是结论，不是缺失
+  if (raw.evidence <= 0) return NEUTRAL_STARS
+  const delta = raw.weighted / raw.evidence
+  const shrunk = delta * (raw.evidence / (raw.evidence + EVIDENCE_PRIOR))
+  return clamp(Math.round(NEUTRAL_STARS + 2 * shrunk), 1, 5)
+}
+
+/**
+ * 算五维星级。
+ * 特征不足的维度回落到 3 星（中性），而不是 1 星 —— 没测到不等于差。
+ */
+export function computeScorecard(features: FeatureItem[]): Scorecard {
+  const acc = accumulate(features)
   const out = {} as Scorecard
-  for (const dim of SCORE_DIMENSIONS) {
-    // 权重和过低说明该维度基本没测到，给中性 3 星
-    if (den[dim] < 0.5) {
-      out[dim] = 3
-      continue
-    }
-    const ratio = num[dim] / den[dim]
-    // ratio 落在 [0.1, 0.9]，映射到 1–5 星
-    out[dim] = Math.min(5, Math.max(1, Math.round(1 + ((ratio - 0.1) / 0.8) * 4)))
-  }
+  for (const dim of SCORE_DIMENSIONS) out[dim] = starsOf(acc[dim])
   return out
 }
 
 /* ============================================================
    星级的来由
    ============================================================ */
-
-/** balanced 的分值，用作「中和线」—— 传统相术以中和为贵 */
-const NEUTRAL = BAND_VALUE.balanced
 
 export interface DimensionDriver {
   id: string
@@ -187,6 +270,7 @@ export function explainScorecard(
   topN = 3,
 ): Record<ScoreDimension, DimensionExplain> {
   const scorecard = computeScorecard(features)
+  const acc = accumulate(features)
   const buckets: Record<ScoreDimension, DimensionDriver[]> = {
     气度格局: [],
     才智思辨: [],
@@ -194,26 +278,24 @@ export function explainScorecard(
     执行意志: [],
     根基福泽: [],
   }
-  const den: Record<ScoreDimension, number> = blank()
 
   for (const f of features) {
-    // 判线站不住的项不进星级 —— 否则一条错判会把每个人的同一维度一起推高或压低
     if (isEvidenceOnly(f.id)) continue
+    if (!isScoredBand(f.band)) continue
     const w = weightsFor(f.id)
     if (!w) continue
-    const v = BAND_VALUE[f.band]
+    const delta = BAND_DELTA[f.band]
+    // 偏移为 0（中和）的不算驱动项：它既没往上推也没往下拉，
+    // 列出来只会稀释真正的理由
+    if (delta === 0) continue
     for (const [dim, weight] of Object.entries(w) as [ScoreDimension, number][]) {
-      den[dim] += weight * f.confidence
-      // 正好落在中和线上的（balanced / categorical）不算驱动项：
-      // 它们既没往上推也没往下拉，列出来只会稀释真正的理由
-      if (v === NEUTRAL) continue
       buckets[dim].push({
         id: f.id,
         label: f.label,
         meaning: f.meaning,
         source: f.source,
-        direction: f.band === 'very_high' ? 'excess' : v > NEUTRAL ? 'up' : 'down',
-        influence: weight * f.confidence * Math.abs(v - NEUTRAL),
+        direction: f.band === 'very_high' ? 'excess' : delta > 0 ? 'up' : 'down',
+        influence: weight * f.confidence * Math.abs(delta),
       })
     }
   }
@@ -226,22 +308,13 @@ export function explainScorecard(
     out[dim] = {
       stars: scorecard[dim],
       count: features.filter((f) => weightsFor(f.id)?.[dim] !== undefined).length,
-      // 与 computeScorecard 里的回落条件保持一致
-      neutralFallback: den[dim] < 0.5,
+      // 与 computeScorecard 里的回落条件保持一致 —— 用 coverage 而不是 evidence：
+      // 「各项都在中和区间」不是「没测到」
+      neutralFallback: isNeutralFallback(acc[dim]),
       drivers,
     }
   }
   return out
-}
-
-function blank(): Record<ScoreDimension, number> {
-  return {
-    气度格局: 0,
-    才智思辨: 0,
-    人际情感: 0,
-    执行意志: 0,
-    根基福泽: 0,
-  }
 }
 
 /** 各维度的一句话说明，报告页展示用 */
