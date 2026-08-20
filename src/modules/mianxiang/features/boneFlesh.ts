@@ -7,15 +7,15 @@
  *
  * 三个代理量：
  *   · jawAngularity  下颌轮廓的转折锐度 —— 骨感的脸转折硬，肉感的脸转折圆
- *   · cheekFullness  颊部相对「颧—颌」连线的外鼓量 —— 鼓即有肉
+ *   · cheekFullness  颊部中段相对自身上下缘连线的矢高 —— 鼓即有肉，凹即见骨
  *   · boneFleshIndex 两者合成，高 = 骨多肉少
  *
  * ⚠️ 这是**代理**，不是测量：胖瘦、年龄、表情都会影响它。
  * 因此以 inferred 出具，且措辞里必须带上推估。
  */
 
-import { dot3, len3, norm3, sub3 } from '@/core/vec3'
-import { GONION, JAW_MID, ZYGOMATIC, CHIN_SIDE } from '../landmarks'
+import { dot3, norm3, sub3 } from '@/core/vec3'
+import { CHEEK_COLUMN, GONION, JAW_MID, ZYGOMATIC, CHIN_SIDE } from '../landmarks'
 import { prominence, type FaceFrame } from '../normalize'
 import { pctStr, round3, type FeatureModule, type FeatureSpec, type Measurement } from './types'
 
@@ -24,9 +24,6 @@ const JAW_CHAIN = {
   left: [ZYGOMATIC.left, GONION.left, JAW_MID.left, CHIN_SIDE.left],
   right: [ZYGOMATIC.right, GONION.right, JAW_MID.right, CHIN_SIDE.right],
 } as const
-
-/** 颊部中心附近，用来量外鼓 */
-const CHEEK = { left: [425, 280, 352], right: [205, 50, 123] } as const
 
 const SPECS: FeatureSpec[] = [
   {
@@ -45,7 +42,7 @@ const SPECS: FeatureSpec[] = [
     unit: 'iod',
     method: 'shading',
     source: '太清神鉴',
-    describe: '颊部相对「颧—颌角」连线的外鼓量。鼓即有肉，凹即见骨',
+    describe: '颊部中段相对「颊上缘—颊下缘」连线的矢高。正 = 外鼓有肉，负 = 内凹见骨',
   },
   {
     id: 'face3d.boneFlesh.index',
@@ -75,29 +72,37 @@ export const boneFleshModule: FeatureModule = {
     // 90° 视为极方硬、160° 视为极圆润，中间线性
     const angularity = clamp01((160 - gonialAngle) / 70)
 
-    /* ---- 颊部外鼓：颊心相对「颧—颌角」连线的偏移 ---- */
-    const bulgeOf = (side: 'left' | 'right'): number => {
-      const zyg = P[ZYGOMATIC[side]]
-      const gon = P[GONION[side]]
-      const axis = sub3(gon, zyg)
-      const axisLen = len3(axis) || 1
-      const u = { x: axis.x / axisLen, y: axis.y / axisLen, z: axis.z / axisLen }
-      const cheek = CHEEK[side].map((i) => P[i])
-      const c = {
-        x: cheek.reduce((s, p) => s + p.x, 0) / cheek.length,
-        y: cheek.reduce((s, p) => s + p.y, 0) / cheek.length,
-        z: cheek.reduce((s, p) => s + p.z, 0) / cheek.length,
-      }
-      const d = sub3(c, zyg)
-      const along = dot3(d, u)
-      const perp = sub3(d, { x: u.x * along, y: u.y * along, z: u.z * along })
-      return dot3(perp, frame.facePlane.normal)
+    /* ---- 颊部外鼓：颊部自身的矢高 ----
+     *
+     * ⚠️ 这里曾经量错过，值得记一笔。原做法是「颊心相对**颧—颌角**连线的偏移」，
+     * 而 ZYGOMATIC 与 GONION 都在 FACE_OVAL 上，属侧廓：规范帧里颧在面平面后
+     * 39% IOD、颌角后 13%。于是拿侧廓连线去量正面颊部，量到的其实是
+     * **脸的前后厚度** —— 每张脸都有约 54% IOD，而归一化分母写的是 8%，
+     * 于是 fleshiness 恒为 1.0，骨肉指数退化成只由颌线转折决定。
+     * 两张实测脸都因此落进「肉胜于骨」。
+     *
+     * 现在改为在**同一片正面颊部**上取矢高 —— 与 nose.dorsumConvexity
+     * 量鼻梁曲直是同一套办法：上下两点连成弦，中点高出弦多少即为鼓。
+     * 正 = 外鼓有肉，负 = 内凹见骨，与光照无关，也与脸的厚薄无关。
+     */
+    const sagittaOf = (side: 'left' | 'right'): number => {
+      const c = CHEEK_COLUMN[side]
+      const prom = (i: number) => dot3(sub3(P[i], frame.facePlane.point), frame.facePlane.normal)
+      const span = P[c.lower].y - P[c.upper].y
+      // 中点在弦上的位置，按 y 线性插值；退化时取中
+      const t = Math.abs(span) > 1e-6 ? clamp01((P[c.mid].y - P[c.upper].y) / span) : 0.5
+      const chord = prom(c.upper) + t * (prom(c.lower) - prom(c.upper))
+      return prom(c.mid) - chord
     }
-    const cheekFullness = (bulgeOf('left') + bulgeOf('right')) / 2
+    const cheekFullness = (sagittaOf('left') + sagittaOf('right')) / 2
 
     /* ---- 合成 ----
-     * 颊鼓 8% IOD 记为「很有肉」。两项各占一半，方向相反。 */
-    const fleshiness = clamp01(cheekFullness / 0.08)
+     * 0 = 颊平（弦上无起伏，骨形直接显出来）；上端取 12% IOD 记为「很有肉」。
+     * ⚠️ CALIBRATE：下端 0 有明确含义，上端没有 —— 12% 是照矢高的量纲挑的，
+     * 只保证实测值落在刻度内而不贴边（规范脸 5.9%、真人脸 9.3%）。
+     * 真实人群到手后应按分位重设。real-face.test.ts 有一条通用的饱和检查守着，
+     * 正是它当初漏掉了这一项。 */
+    const fleshiness = clamp01(cheekFullness / 0.12)
     const index = clamp01(0.5 * angularity + 0.5 * (1 - fleshiness))
 
     // 颧部前突拿来给证据加一句：骨感的脸颧骨往往更立
@@ -112,7 +117,7 @@ export const boneFleshModule: FeatureModule = {
       {
         specId: 'face3d.boneFlesh.cheekFullness',
         value: round3(cheekFullness),
-        evidence: `颊心相对颧—颌角连线外鼓 ${(cheekFullness * 100).toFixed(1)}% IOD，颧部前突 ${(zygo * 100).toFixed(1)}% IOD`,
+        evidence: `颊部中段相对上下缘连线的矢高 ${(cheekFullness * 100).toFixed(1)}% IOD（正为鼓、负为凹），颧部前突 ${(zygo * 100).toFixed(1)}% IOD`,
         factor: frame.poseFactor,
         status: 'inferred',
       },

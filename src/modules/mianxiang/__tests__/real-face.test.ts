@@ -17,6 +17,7 @@ import { fileURLToPath, URL } from 'node:url'
 import type { P3 } from '@/core/geom'
 import { computeFaceMetrics } from '../metrics'
 import { applyFaceRules } from '../rules'
+import { computeFace3DFeatures, FEATURE_REGISTRY } from '../features'
 import { computeScorecard } from '@/core/scorecard'
 
 const fx = JSON.parse(
@@ -28,6 +29,13 @@ const fx = JSON.parse(
 
 const LM: P3[] = fx.landmarks.map(([x, y, z]) => ({ x, y, z }))
 const M = computeFaceMetrics(LM, fx.width, fx.height)
+const FACE3D = computeFace3DFeatures({
+  landmarks: LM,
+  imgWidth: fx.width,
+  imgHeight: fx.height,
+  qualityFactor: 0.9,
+  detectorScore: 0.95,
+})
 
 describe('真人脸 · 度量不越界', () => {
   it('归一化到 0–1 的指标不能贴边饱和', () => {
@@ -40,6 +48,37 @@ describe('真人脸 · 度量不越界', () => {
       expect(v, `${name} 饱和在 ${v}，归一化区间需要重设`).toBeGreaterThan(0.02)
       expect(v, `${name} 饱和在 ${v}，归一化区间需要重设`).toBeLessThan(0.98)
     }
+  })
+
+  /**
+   * 上面那条是**点名**查两项，于是漏掉了别的。
+   *
+   * face3d.boneFlesh.cheekFullness 就是这么漏过去的：它拿侧廓两点的连线去量
+   * 正面颊部，量到的是脸的前后厚度（约 54% IOD），而归一化分母写的是 8%，
+   * 于是合成的 fleshiness 恒为 1.0，骨肉指数退化成只由颌线转折决定。
+   * 两张实测脸都因此落进「肉胜于骨」——「骨肉」那条组合正是因此被摘掉的。
+   *
+   * 所以改成**按注册表遍历**：凡是 unit='score' 的合成量都查，不再点名。
+   * 新增一个 0–1 合成量却忘了定标，这条会直接红。
+   */
+  it('所有 0–1 合成量都不贴边 —— 遍历注册表，不点名', () => {
+    const scores = FACE3D.features.filter(
+      (f) => FEATURE_REGISTRY.get(f.id)?.unit === 'score',
+    )
+    expect(scores.length, '一个 score 量都没查到，这条测试是空转').toBeGreaterThan(3)
+
+    for (const f of scores) {
+      const v = Number(f.value)
+      expect(v, `${f.id}（${f.label}）饱和在 ${v}，归一化区间需要重设`).toBeGreaterThan(0.02)
+      expect(v, `${f.id}（${f.label}）饱和在 ${v}，归一化区间需要重设`).toBeLessThan(0.98)
+    }
+  })
+
+  it('颊部矢高有正负之分，且量级合理 —— 它量的是鼓凹，不是脸的厚薄', () => {
+    const cheek = FACE3D.features.find((f) => f.id === 'face3d.boneFlesh.cheekFullness')!
+    const v = Number(cheek.value)
+    // 修好之前这里是 0.542（54% IOD）—— 那是脸的前后厚度，不是颊部的鼓
+    expect(Math.abs(v), `颊部矢高 ${v} 过大，多半又量成了前后厚度`).toBeLessThan(0.25)
   })
 
   it('所有度量都是有限数', () => {
