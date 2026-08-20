@@ -244,7 +244,8 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
   )
 
   const openness = bilateral(m.eye.left.openness, m.eye.right.openness)
-  const opBand = toBand(openness, { veryLo: 0.5, lo: 0.62, hi: 0.85, veryHi: 0.95 })
+  // 判线搬到 thresholds（原来硬写在这里，且是照语感定的而非照测量定的，见 T.openness）
+  const opBand = toBand(openness, T.openness)
   push(
     'face.eye.openness', '眼',
     opBand === 'high' || opBand === 'very_high' ? '眼神清明' : opBand === 'balanced' ? '目光平和' : '眼神含蓄',
@@ -256,6 +257,7 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
         ? '目光温和，待人有度'
         : '传统称目光藏而不露，主城府较深、心事不轻示人',
     '麻衣神相',
+    T.openness,
   )
 
   // 三白眼
@@ -274,15 +276,20 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
 
   /* ============ 鼻 ============ */
   const n = m.nose
-  const straight = n.bridgeDeviation <= T.bridgeStraight
+  /**
+   * 鼻梁弓度只报数，不判「挺直 / 欹曲」—— 该项已列入 core/evidenceOnly。
+   *
+   * 判线（挺直线 0.025）离实测量级 30 倍：规范脸 0.000、真人脸夹具 0.0008。
+   * 于是 98% 的人判「鼻梁挺直」并领到贵格断语「梁柱端正」，
+   * 那条断语因此等于报告模板的一部分，而不是关于这个人的话。
+   * 光靠两张直鼻子定不出歪鼻子的线，所以在有偏曲样本之前不下判断。
+   */
   push(
-    'face.nose.bridge', '鼻', straight ? '鼻梁挺直' : '鼻梁微曲',
-    straight ? 'high' : 'low', round(n.bridgeDeviation, 3), 'measured', conf('geometry'),
-    `鼻梁中轴最大偏移为 IOD 的 ${(n.bridgeDeviation * 100).toFixed(1)}%（挺直线为 ${(T.bridgeStraight * 100).toFixed(0)}%）`,
-    straight
-      ? '为人正直，意志坚定，认准方向不易动摇'
-      : '传统称鼻梁欹曲，主中年多蹇滞、心思偏曲，处事好变通而少定见',
-    '麻衣神相',
+    'face.nose.bridge', '鼻', '鼻梁弓度', 'categorical',
+    round(n.bridgeDeviation, 3), 'measured', conf('geometry'),
+    `鼻梁各点相对「山根→鼻底」弦线的最大矢高为 IOD 的 ${(n.bridgeDeviation * 100).toFixed(2)}%`,
+    '此项为数值依据：本次采集只能测出鼻梁相对自身弦线的弓度，尚无经真实人群校准的判线，故不作挺直或欹曲的论断',
+    null,
   )
 
   const bhBand = toBand(n.bridgeHeight, T.bridgeHeight)

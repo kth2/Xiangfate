@@ -129,7 +129,7 @@ export function detectTopics(question: string): QaTopic[] {
   return TOPIC_ORDER.filter((t) => TOPIC_GUIDES[t].keywords.some((k) => q.includes(k)))
 }
 
-/** 追问回答的结构（知识库第 5 节）。报告的七段式不适用于追问 */
+/** 追问回答的结构（知识库第 5 节）。报告的分段结构不适用于追问 */
 export const ANSWER_STRUCTURE = [
   '对应特征：本次实测到的相关指标 1–3 条，带传统术语与关键数值',
   '传统说法：这些特征在相书里主什么，1–2 句',

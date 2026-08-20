@@ -10,6 +10,7 @@
  */
 
 import { BAND_VALUE } from './band'
+import { isEvidenceOnly } from './evidenceOnly'
 import {
   SCORE_DIMENSIONS,
   type Classic,
@@ -115,6 +116,8 @@ export function computeScorecard(features: FeatureItem[]): Scorecard {
   const den: Record<ScoreDimension, number> = blank()
 
   for (const f of features) {
+    // 判线站不住的项不进星级 —— 否则一条错判会把每个人的同一维度一起推高或压低
+    if (isEvidenceOnly(f.id)) continue
     const w = weightsFor(f.id)
     if (!w) continue
     const v = BAND_VALUE[f.band]
@@ -194,6 +197,8 @@ export function explainScorecard(
   const den: Record<ScoreDimension, number> = blank()
 
   for (const f of features) {
+    // 判线站不住的项不进星级 —— 否则一条错判会把每个人的同一维度一起推高或压低
+    if (isEvidenceOnly(f.id)) continue
     const w = weightsFor(f.id)
     if (!w) continue
     const v = BAND_VALUE[f.band]

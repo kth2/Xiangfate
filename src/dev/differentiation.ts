@@ -274,7 +274,63 @@ export function collectBandSpecs(root: unknown, prefix: string): [string, BandSp
 }
 
 /* ============================================================
-   6. prompt 差异率
+   6. 提纲多样性
+   ============================================================ */
+
+export interface OutlineStats {
+  /** 不同的段落序列有多少种 */
+  distinctOutlines: number
+  /** 两两段落集合的平均 Jaccard 相似度。1 = 所有人同一张骨架 */
+  meanJaccard: number
+  /** 段数分布 */
+  lengthHistogram: Map<number, number>
+  /** 专题段 → 入选率 */
+  topicRate: Map<string, number>
+}
+
+/**
+ * 报告骨架的多样性。
+ *
+ * 这一项比字符差异率更能说明问题：骨架相同意味着无论测到什么，
+ * 模型都得把同一组标题填满 —— 那时候即使数值不同，读起来也是同一篇。
+ */
+export function outlineStats(outlines: readonly string[][]): OutlineStats {
+  const n = outlines.length
+  const sets = outlines.map((o) => new Set(o))
+
+  let sum = 0
+  let pairs = 0
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      let inter = 0
+      for (const x of sets[i]) if (sets[j].has(x)) inter++
+      const union = sets[i].size + sets[j].size - inter
+      sum += union ? inter / union : 1
+      pairs++
+    }
+  }
+
+  const lengthHistogram = new Map<number, number>()
+  const topicHits = new Map<string, number>()
+  for (const o of outlines) {
+    lengthHistogram.set(o.length, (lengthHistogram.get(o.length) ?? 0) + 1)
+    for (const sec of o) topicHits.set(sec, (topicHits.get(sec) ?? 0) + 1)
+  }
+
+  return {
+    distinctOutlines: new Set(outlines.map((o) => o.join('>'))).size,
+    meanJaccard: pairs ? sum / pairs : 1,
+    lengthHistogram: new Map([...lengthHistogram].sort((a, b) => a[0] - b[0])),
+    topicRate: new Map(
+      [...topicHits]
+        .map(([k, v]) => [k, v / n] as [string, number])
+        .sort((a, b) => b[1] - a[1]),
+    ),
+  }
+}
+
+/* ============================================================
+   7. prompt 差异率
    ============================================================ */
 
 export interface PromptDivergence {

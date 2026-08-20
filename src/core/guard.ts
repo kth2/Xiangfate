@@ -14,7 +14,9 @@ import {
   CRISIS_KEYWORDS,
   LENGTH,
   MAJOR_DECISION_KEYWORDS,
-  REQUIRED_SECTIONS,
+  ALLOWED_SECTIONS,
+  CORE_SECTIONS,
+  SECTION_COUNT,
   WORD_LISTS,
   type GuardCategory,
 } from './guard.rules'
@@ -40,10 +42,22 @@ const SECTION_RE = /^##\s+(.+?)\s*$/gm
 /** 中英文句子切分，保留标点 */
 const SENTENCE_RE = /[^。！？；\n]+[。！？；]?/g
 
+export interface GuardOptions {
+  allowRegenerate?: boolean
+  /**
+   * 本次要求的段落序列（core/outline.ts 算出来的）。
+   *
+   * 给了就按它逐段核对 —— 报告必须含齐提纲里的每一段，多出来的剔除。
+   * 不给就退回 CORE_SECTIONS / ALLOWED_SECTIONS：追问回答与历史记录重放
+   * 这些路径上没有提纲，不能因此把旧报告判成结构不合。
+   */
+  sections?: readonly string[]
+}
+
 export function guardReport(
   raw: string,
   unavailable: UnavailableItem[] = [],
-  opts: { allowRegenerate?: boolean } = {},
+  opts: GuardOptions = {},
 ): GuardResult {
   const hits: GuardHit[] = []
   let text = raw.trim()
@@ -53,15 +67,22 @@ export function guardReport(
 
   /* ---- 结构检查 ---- */
   const found = [...text.matchAll(SECTION_RE)].map((m) => m[1].trim())
-  const missing = REQUIRED_SECTIONS.filter((s) => !found.includes(s))
+  const required: readonly string[] = opts.sections?.length ? opts.sections : CORE_SECTIONS
+  const allowed: readonly string[] = opts.sections?.length ? opts.sections : ALLOWED_SECTIONS
+
+  const missing = required.filter((s) => !found.includes(s))
   if (missing.length) {
     hits.push({ category: 'structure', token: `缺少小节 ${missing.join('/')}`, action: 'regenerate' })
   }
   // 白名单外的小节直接剔除
-  const extras = found.filter((s) => !(REQUIRED_SECTIONS as readonly string[]).includes(s))
+  const extras = found.filter((s) => !allowed.includes(s))
   for (const extra of extras) {
     text = removeSection(text, extra)
     hits.push({ category: 'structure', token: `多余小节 ${extra}`, action: 'strip' })
+  }
+  const keptSections = found.filter((s) => allowed.includes(s)).length
+  if (keptSections < SECTION_COUNT.min || keptSections > SECTION_COUNT.max) {
+    hits.push({ category: 'structure', token: `小节数 ${keptSections} 越界`, action: 'regenerate' })
   }
 
   /* ---- 逐句过滤 ---- */
@@ -127,7 +148,7 @@ export function guardReport(
 /**
  * 只做逐句内容过滤，不碰结构、不补空节。
  *
- * 追问回答走这条路：它本来就没有六/七段式结构，
+ * 追问回答走这条路：它本来就没有报告那样的分段结构，
  * 早先的做法是把答案包成一个假的「## 特征识别」再跑整套 finalizeReport，
  * 结果 fillEmptySections 会把不足 50 字的答案整段换成
  * 「（本次测得的特征不足以就这一部分展开，暂略。）」——
@@ -165,8 +186,12 @@ export function filterSentences(
 }
 
 /** 第二遍：不再重生成时，把 regenerate 类的句子也删掉 */
-export function finalizeReport(raw: string, unavailable: UnavailableItem[] = []): GuardResult {
-  const first = guardReport(raw, unavailable, { allowRegenerate: false })
+export function finalizeReport(
+  raw: string,
+  unavailable: UnavailableItem[] = [],
+  sections?: readonly string[],
+): GuardResult {
+  const first = guardReport(raw, unavailable, { allowRegenerate: false, sections })
   const labels = unavailable.map((u) => u.label).filter((l) => l.length >= 2)
 
   const lines = first.text.split('\n')

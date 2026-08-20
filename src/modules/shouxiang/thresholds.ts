@@ -17,8 +17,8 @@ export const T = {
   indexRing: { veryLo: 0.9, lo: 0.94, hi: 1.02, veryHi: 1.07 } satisfies BandSpec,
   indexLong: 1.02,
   ringLong: 0.94,
-  /** 指节突出度 0–1 */
-  knuckle: { veryLo: 0.2, lo: 0.32, hi: 0.55, veryHi: 0.7 } satisfies BandSpec,
+  /** 指节突出度 0–1。收窄至 ±15%（原 ±26.4%）。CALIBRATE */
+  knuckle: { veryLo: 0.32, lo: 0.37, hi: 0.50, veryHi: 0.58 } satisfies BandSpec,
 
   /** 手型分类判据 */
   handType: {
@@ -26,7 +26,8 @@ export const T = {
     narrowPalm: 0.72,
     longFinger: 0.95,
     shortFinger: 0.85,
-    knuckleHigh: 0.55,
+    /** 原值 0.55 是旧档位的 hi，随 knuckle 收窄一起下移到新的 hi */
+    knuckleHigh: 0.5,
   },
 
   /** 掌线度量 */

@@ -13,6 +13,7 @@ import {
   type GuardHit,
 } from '@/core/guard'
 import type { AnalysisEnvelope } from '@/core/types'
+import { buildOutline } from '@/core/outline'
 import { correctionNote, SYSTEM_PROMPT } from '@/prompts/system'
 import { buildFollowUpPrompt, buildUserPrompt, summarizeReport } from '@/prompts/user'
 import { createGeminiProvider } from './gemini'
@@ -105,6 +106,12 @@ export class AnalysisSession {
    */
   async *generateReport(signal?: AbortSignal): AsyncGenerator<StreamEvent> {
     const userPrompt = buildUserPrompt(this.envelope)
+    // 与 buildUserPrompt 里算的是同一份提纲（纯函数、同一输入），
+    // guard 因此能逐段核对本次实际要求的标题，而不是一张写死的清单
+    const outline = buildOutline(
+      this.envelope.features,
+      this.envelope.subject?.focusTopics?.filter(Boolean) ?? [],
+    )
     const base: ChatMessage[] = [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
@@ -120,7 +127,7 @@ export class AnalysisSession {
       yield { delta: d }
     }
 
-    let result = guardReport(raw, this.envelope.unavailable)
+    let result = guardReport(raw, this.envelope.unavailable, { sections: outline.sections })
     let regenerated = false
 
     if (result.shouldRegenerate) {
@@ -142,7 +149,7 @@ export class AnalysisSession {
         raw2 += d
       }
       // 第二次不再给机会：残留的问题句直接删
-      result = finalizeReport(raw2, this.envelope.unavailable)
+      result = finalizeReport(raw2, this.envelope.unavailable, outline.sections)
       raw = raw2
       regenerated = true
     }
@@ -177,7 +184,7 @@ export class AnalysisSession {
       yield { delta: d }
     }
 
-    // 追问不检查七段式结构，只做内容过滤
+    // 追问不检查报告的分段结构，只做内容过滤
     const filtered = filterFollowUp(raw, this.envelope)
     this.history.push({ role: 'user', content: question }, { role: 'assistant', content: filtered.text })
 

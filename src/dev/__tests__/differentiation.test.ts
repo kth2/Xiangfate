@@ -27,11 +27,13 @@ import { T } from '@/modules/mianxiang/thresholds'
 import { T as TH } from '@/modules/shouxiang/thresholds'
 import { T as TG } from '@/modules/guxiang/thresholds'
 import { T as TB } from '@/modules/tixiang/thresholds'
+import { buildOutline } from '@/core/outline'
 import {
   auditBand,
   collectBandSpecs,
   featureConcentration,
   promptDivergence,
+  outlineStats,
   scorecardStats,
   seededNormal,
   seededRandom,
@@ -189,8 +191,12 @@ describe('阈值带宽审计', () => {
     say(`\n半宽 > ±25%（几乎不可能区分人）的档：${tooWide.length} / ${audits.length}`)
     for (const t of tooWide) say('  ' + t)
 
-    // 钉住现状：这个数只许下降。校准落地后把期望值一起改小。
-    expect(tooWide.length).toBeLessThanOrEqual(15)
+    // 收窄后剩 3 个，且都不是真问题：
+    // cornerLift / canthalTilt 中心在 0 附近，「半宽 ÷ 中心」对它们没有意义
+    // （实测两张脸分别落 very_high / balanced，本来就能区分人）；
+    // bridgeDeviation 已列入 core/evidenceOnly，不再下判断。
+    // 这个数只许下降。
+    expect(tooWide.length).toBeLessThanOrEqual(3)
     expect(audits.length).toBeGreaterThan(35)
   })
 })
@@ -239,33 +245,38 @@ describe('特征分档集中度', () => {
   })
 })
 
-describe('虹膜可见度（openness）的结构性偏低', () => {
+describe('虹膜可见度（openness）的判线', () => {
   /**
    * openness = 可见虹膜高 ÷ 虹膜直径。人的睑裂高度普遍**小于**虹膜直径
-   * （虹膜约 11.7mm，睑裂高约 9–11mm），于是这个比值天然压在 0.6 上下，
-   * 而档位判线是 lo=0.62 / hi=0.85 —— 中和档的下沿就已经高于常见值。
+   * （虹膜约 11.7mm，睑裂高约 9–11mm），于是这个比值天然压在 0.6 上下。
    *
-   * 后果：项目现有的两张脸都判「眼神含蓄」，并由此命中忌相
-   * 「目光藏 —— 城府较深、心事不轻示人」。也就是说凡是测过的人，
-   * 都被告知城府深。这一条判线必须用真实样本重定。
+   * 原判线（硬写在 rules 里的 lo=0.62 / hi=0.85）是照传统「目宜露神」的语感定的：
+   * 中和档的下沿就已经高于常见实测值，于是凡是测过的人都判「眼神含蓄」、
+   * 都拿到忌相「目光藏 —— 城府较深」，而贵格「目光清明」（需 ≥0.85）
+   * 在解剖上几乎不可能达到。判线现已按实测值重设（T.openness）。
    */
-  const OPENNESS_BAND = { lo: 0.62, hi: 0.85 }
-
-  it('两张实测脸都落在中和档之下', () => {
+  it('两张实测脸都落在中和档内，而不是一律压在档外', () => {
     const values = [
       ['规范脸', (CANON.eye.left.openness + CANON.eye.right.openness) / 2],
       ['真人脸', (REAL.eye.left.openness + REAL.eye.right.openness) / 2],
     ] as const
     say('\n===== 虹膜可见度 =====')
-    for (const [tag, v] of values) say(`  ${tag}: ${v.toFixed(3)}（中和档下沿 ${OPENNESS_BAND.lo}）`)
-    for (const [, v] of values) expect(v).toBeLessThan(OPENNESS_BAND.lo)
+    for (const [tag, v] of values) say(`  ${tag}: ${v.toFixed(3)}（中和区 [${T.openness.lo.toFixed(3)}, ${T.openness.hi.toFixed(3)}]）`)
+    for (const [, v] of values) {
+      expect(v).toBeGreaterThanOrEqual(T.openness.lo)
+      expect(v).toBeLessThanOrEqual(T.openness.hi)
+    }
   })
 
-  it('两张实测脸都因此命中忌相「目光藏」', () => {
+  it('「目光藏」不再是人人都有 —— 修正前两张脸都命中', () => {
     for (const m of [CANON, REAL]) {
-      const names = verdictStats([runRules(m).features], 'mianxiang').hitRate
-      expect([...names.keys()]).toContain('目光藏')
+      const names = [...verdictStats([runRules(m).features], 'mianxiang').hitRate.keys()]
+      expect(names).not.toContain('目光藏')
     }
+    // 人群里仍然有人命中，只是不再是全部
+    const rate = verdictStats(FEATURE_SETS, 'mianxiang').hitRate.get('目光藏') ?? 0
+    say(`  人群中「目光藏」命中率：${(rate * 100).toFixed(0)}%`)
+    expect(rate).toBeLessThan(0.5)
   })
 })
 
@@ -285,15 +296,15 @@ describe('断语多样性', () => {
     say(`人人都有的断语（≥90%）：${stats.universal.join('、') || '（无）'}`)
   })
 
-  it('人人都有的断语不超过 2 条 —— 每一条都等于没说', () => {
-    // 「目光藏」来自 face.eye.openness 的结构性缺陷（见 KNOWN_DEGENERATE），
-    // 「梁柱端正」来自 bridgeDeviation 判线过宽（±42.9%）。两条都待校准。
-    expect(stats.universal.length).toBeLessThanOrEqual(2)
+  it('没有人人都有的断语 —— 一条断语命中九成以上的人就等于没说', () => {
+    // 修正前有两条：「梁柱端正」98%（bridgeDeviation 判线不可达）、
+    // 「印堂宽广」95%（browGap 中心错了 1.8 倍）。
+    expect(stats.universal).toEqual([])
   })
 
   it('断语组合足够多样', () => {
-    expect(stats.distinctSets).toBeGreaterThan(N * 0.4)
-    expect(stats.meanJaccard).toBeLessThan(0.6)
+    expect(stats.distinctSets).toBeGreaterThan(N * 0.7)
+    expect(stats.meanJaccard).toBeLessThan(0.3)
   })
 })
 
@@ -325,16 +336,70 @@ describe('星级多样性', () => {
   })
 
   it('五维组合的种类数不至于寥寥可数', () => {
-    // 用户眼前看到的就是这张星级卡。理论上限 5^5 = 3125，
-    // 当前只有 19 种 —— 这个数本身就是「换个人结果差不多」的直接来源：
+    // 用户眼前看到的就是这张星级卡。理论上限 5^5 = 3125。
+    // 阈值收窄前只有 19 种，现在 34 种。仍然偏少，剩下的瓶颈是映射本身：
     // BAND_VALUE.balanced = 0.75 经 (ratio-0.1)/0.8 映射后落在 4.25 星，
-    // 于是中和区里的人几乎一律 4 星。钉住现状，只许上升。
-    expect(stats.distinctCards).toBeGreaterThanOrEqual(19)
+    // 于是中和区里的人几乎一律 4 星 —— 这一项要改星级映射，不是改阈值。
+    // 钉住现状，只许上升。
+    expect(stats.distinctCards).toBeGreaterThanOrEqual(34)
   })
 })
 
 /* ============================================================
-   5. prompt 差异率 —— AI 到底拿到了多少「这个人」的信息
+   5. 提纲多样性 —— 报告骨架是否随人而变
+   ============================================================ */
+
+describe('报告提纲多样性', () => {
+  const outlines = FEATURE_SETS.map((f) => buildOutline(f).sections)
+  const stats = outlineStats(outlines)
+
+  it('列出分布', () => {
+    say('\n===== 报告提纲 =====')
+    say(`不同的段落序列：${stats.distinctOutlines} 种 / ${N} 人`)
+    say(`段落集合两两 Jaccard 相似度：${(stats.meanJaccard * 100).toFixed(1)}%`)
+    say('段数分布：' + [...stats.lengthHistogram].map(([k, v]) => `${k} 段 ${((v / N) * 100).toFixed(0)}%`).join('  '))
+    say('各段入选率：')
+    for (const [sec, rate] of stats.topicRate) say(`  ${(rate * 100).toFixed(0).padStart(4)}%  ${sec}`)
+  })
+
+  it('骨架不是所有人一样 —— 这是「读起来都一样」最直接的来由', () => {
+    // 改造前骨架写死在 System Prompt 里：七段、顺序固定、每段还各有字数配额，
+    // 于是 distinctOutlines 恒为 1。钉住现状，只许上升。
+    expect(stats.distinctOutlines).toBeGreaterThanOrEqual(70)
+    expect(stats.meanJaccard).toBeLessThan(0.85)
+  })
+
+  it('段数本身会变 —— 测到得多就多写一段，少就少写', () => {
+    expect(stats.lengthHistogram.size).toBeGreaterThanOrEqual(4)
+  })
+
+  it('除核心段外，没有哪个专题段人人都有', () => {
+    const core = ['特征识别', '断语', '性格特质', '状态提示', '发展建议']
+    const alwaysOn = [...stats.topicRate]
+      .filter(([sec, rate]) => rate >= 1 && !core.includes(sec))
+      .map(([sec]) => sec)
+    say(`\n  入选率 100% 的专题段：${alwaysOn.join('、') || '（无）'}`)
+    expect(alwaysOn).toEqual([])
+  })
+
+  it('真人脸与规范脸拿到的骨架不同', () => {
+    const a = buildOutline(runRules(REAL).features).sections
+    const b = buildOutline(runRules(CANON).features).sections
+    say(`\n  真人脸：${a.join(' → ')}`)
+    say(`  规范脸：${b.join(' → ')}`)
+    expect(a).not.toEqual(b)
+  })
+
+  it('关注方向会改变骨架 —— 它不再是 prompt 末尾的一句摆设', () => {
+    const features = runRules(REAL).features
+    const plain = buildOutline(features).sections
+    const focused = buildOutline(features, ['想问财运与积累']).sections
+    expect(focused).not.toEqual(plain)
+  })
+})
+
+/* ============================================================
+   6. prompt 差异率 —— AI 到底拿到了多少「这个人」的信息
    ============================================================ */
 
 function envelopeOf(m: FaceMetrics): AnalysisEnvelope {
@@ -383,10 +448,16 @@ describe('prompt 差异率', () => {
     say(`只出现在真人脸那一份里的行：${d.onlyInA.length} 行`)
     for (const l of d.onlyInA) say('  A| ' + l)
 
-    // 这是四问里最关键的一个数。差异率过低时，System 里那套
-    // 「七段 + 每段字数 + 固定小标题」的模板会主导输出，
-    // 于是不同的人读到几乎同一篇文章 —— 与知识库大小无关。
-    expect(d.divergenceRatio).toBeGreaterThan(0.1)
+    // 这是四问里最关键的一个数。改造前是 13.8%，且其中**全部**是 JSON 数值 ——
+    // 指令部分（写哪几段、重心落在哪）对所有人一字不差。
+    // 现在提纲与「最反常的几项」也因人而异，所以差异里含了指令。
+    expect(d.divergenceRatio).toBeGreaterThan(0.15)
+
+    // 指令部分必须真的不同，而不只是数字不同：
+    // 提纲那几行出现在 onlyInA 里，才说明模型收到的「怎么写」也是因人而异的
+    const instructionDiff = d.onlyInA.filter((l) => l.startsWith('##') || l.startsWith('· ##'))
+    say(`其中属于提纲/指令的差异行：${instructionDiff.length} 行`)
+    expect(instructionDiff.length).toBeGreaterThan(0)
   })
 
   it('真人脸与规范脸的特征标签不应大面积雷同', () => {
@@ -396,7 +467,7 @@ describe('prompt 差异率', () => {
     const b = labels(runRules(CANON).features)
     const shared = [...a].filter(([id, l]) => b.get(id) === l).length
     say(`\n两张脸共有的特征 id 中，术语相同的：${shared} / ${a.size}`)
-    // 钉住现状。校准推进后这个上限应当继续调低。
-    expect(shared / a.size).toBeLessThanOrEqual(0.8)
+    // 钉住现状（14/20）。校准推进后这个上限应当继续调低。
+    expect(shared / a.size).toBeLessThanOrEqual(0.7)
   })
 })

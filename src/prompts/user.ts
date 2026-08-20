@@ -3,9 +3,11 @@
  * 追问部分另注入 docs/xiangshu-qa-knowledge.md 的主题应对方向。
  */
 
+import { buildOutline, type Outline } from '@/core/outline'
 import { ANSWER_STRUCTURE, detectTopics, TOPIC_GUIDES, TYPE_QA_NOTES } from '@/core/qa'
 import { explainScorecard } from '@/core/scorecard'
 import { verdictBlock } from '@/core/verdicts'
+import { BAND_LABEL } from '@/core/band'
 import { SCORE_DIMENSIONS, type AnalysisEnvelope, type AnalysisType } from '@/core/types'
 
 const HEAD: Record<AnalysisType, string> = {
@@ -112,20 +114,23 @@ worldLandmarks（米制、原点在髋中心）计算，因此与拍摄距离和
 }
 
 /**
- * 裁剪 envelope 以控制 token：
- * raw.metrics 只保留置信度最高的若干项，policy 不必发（已写进 System）。
+ * 裁剪 envelope 以控制 token：raw.metrics 截断，policy 不必发（已写进 System）。
+ *
+ * ⚠️ 原注释写「只保留置信度最高的若干项」，实现却是 `Object.entries().slice()` ——
+ * 按插入顺序截断，与置信度无关。raw.metrics 是一张扁平的数值表，
+ * 本来也没有 confidence 可比。注释改成实话：这里就是按声明顺序取前 N 个，
+ * 声明顺序已经把最常引用的量排在前面。
  */
 export function trimEnvelope(env: AnalysisEnvelope): Record<string, unknown> {
   const { raw, policy: _policy, scorecard: _scorecard, ...rest } = env
   const trimmedRaw = raw?.metrics
-    ? { normalizer: raw.normalizer, metrics: pickTop(raw.metrics, 20) }
+    ? { normalizer: raw.normalizer, metrics: takeFirst(raw.metrics, 24) }
     : raw
   return { ...rest, ...(trimmedRaw ? { raw: trimmedRaw } : {}) }
 }
 
-function pickTop(metrics: Record<string, unknown>, n: number): Record<string, unknown> {
-  const entries = Object.entries(metrics).slice(0, n)
-  return Object.fromEntries(entries)
+function takeFirst(metrics: Record<string, unknown>, n: number): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(metrics).slice(0, n))
 }
 
 /**
@@ -165,9 +170,70 @@ ${lines.join('\n')}
   4. 标注「取中性值」的维度，说明本次没测到足够特征，不要就该维度作实质论断。`
 }
 
+/**
+ * 「这个人最反常的几项」。
+ *
+ * 为什么必须单独给 —— features 数组是平铺的，每一项长得一样，
+ * 于是模型只能按 JSON 顺序挨个写，写出来的自然人人相似。
+ * 术士当面看相不是这样：先抓住这张脸上最扎眼的地方，再由它带出别的。
+ * 这一段就是把「最扎眼的地方」算出来交给它。
+ */
+function salienceBlock(outline: Outline): string {
+  const top = outline.salient.filter((f) => f.salience >= 0.3).slice(0, 6)
+  if (!top.length) {
+    return `【这个人最反常的几项】
+无。本次各项都落在中和区间 —— 这本身就是这份报告要说的话：
+平实无奇也是一种相。不要为了让报告显得丰富而把中和之处写成特点。`
+  }
+  // categorical 项没有「偏高/偏低」可言，别给它挂一个「—」的档位标记
+  const lines = top.map((f) =>
+    f.band === 'categorical'
+      ? `  · ${f.label}：${f.evidence}`
+      : `  · ${f.label}（${BAND_LABEL[f.band]}）：${f.evidence}`,
+  )
+  return `【这个人最反常的几项 —— 由偏离程度算出，不是你选的】
+${lines.join('\n')}
+
+这几项是本次报告的重心：
+  1. 「特征识别」段开头就落它们，不要按数据里的顺序平铺。
+  2. 后面各段展开时优先挂在这几项上 —— 中和区间里的项可以提，但不要当成特点讲。
+  3. 若某一项传统视为忌处，照相书的意思讲，不因为它排在最前就缓和。`
+}
+
+/** 本次报告的段落提纲 —— 由 core/outline 按测到的东西算出 */
+function outlineBlock(outline: Outline): string {
+  const briefs = outline.topics.map((t) => `  · ## ${t.title} —— ${t.brief}`)
+  return `【本次报告提纲 —— 按这个人测到的东西算出，照它写】
+${outline.sections.map((sec) => `  ## ${sec}`).join('\n')}
+
+其中专题段的写作要点：
+${briefs.length ? briefs.join('\n') : '  （本次未入选专题段）'}
+
+注意：这份提纲**因人而异**。别人的报告可能有「财帛与积累」而这一份没有，
+那是因为这个人在财帛相关的项上没测出名堂 —— 不要因此自己补一段回来。`
+}
+
 export function buildUserPrompt(env: AnalysisEnvelope): string {
   const topics = env.subject?.focusTopics?.filter(Boolean) ?? []
+  const outline = buildOutline(env.features, topics)
+
+  // 关注方向放在最前面：它要影响的是「写哪几段、重心落在哪」，
+  // 放在末尾等于让它去和整套格式要求抢注意力，抢不过。
+  const focus = topics.length
+    ? `【用户关注方向 —— 已计入下面的提纲】
+${topics.join('、')}
+这几个方向对应的专题段（若有测到的特征支撑）已经进了提纲，展开时向它们倾斜。
+但**不得**为了迎合关注方向而编造特征：数据里没有的，就照实说这次没覆盖。`
+    : `【用户关注方向】
+未指定 —— 按提纲给定的重心展开即可，不要平均用力。`
+
   return `${HEAD[env.analysisType]}
+
+${focus}
+
+${outlineBlock(outline)}
+
+${salienceBlock(outline)}
 
 【结构化特征数据】
 ${JSON.stringify(trimEnvelope(env), null, 1)}
@@ -176,10 +242,7 @@ ${verdictBlock(env.features, env.analysisType)}
 
 ${scorecardBlock(env)}
 
-【用户关注方向】
-${topics.length ? topics.join('、') : '（未指定，请按标准结构均衡展开。）'}
-
-请严格按 System 中定义的七段式输出。`
+请按上面【本次报告提纲】给定的标题与顺序输出，不增不减。`
 }
 
 export interface FollowUpOptions {
@@ -210,7 +273,7 @@ ${opts.majorDecision ? MAJOR_DECISION_NOTE : ''}
 1. 仍然只能基于上面那份特征数据立论。若问题涉及的特征不在数据中，
    或位于 unavailable 列表，请直接说明「这一点本次测量没有覆盖」，
    并说明需要什么条件才能测到（例如「需要补一张侧面照」）。
-2. 不要重复输出七段式报告结构。直接针对问题作答。
+2. 不要重复输出报告的分段结构。直接针对问题作答。
 3. 长度 200–500 字，用自然段，最多用一个小列表。
 4. System 中的所有禁止事项继续有效，尤其是：
    不预测具体事件与时间、不作疾病诊断、不作寿夭判断。

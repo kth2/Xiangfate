@@ -27,7 +27,7 @@ function feat(p: Partial<FeatureItem> & Pick<FeatureItem, 'id' | 'band'>): Featu
 describe('explainScorecard', () => {
   it('星级与 computeScorecard 完全一致 —— 不能各算各的', () => {
     const features = [
-      feat({ id: 'face.nose.bridge', band: 'high' }),
+      feat({ id: 'bone.mandible', band: 'high' }),
       feat({ id: 'face.eye.openness', band: 'low' }),
       feat({ id: 'face.brow.length', band: 'very_high' }),
       feat({ id: 'face.mouth.corner', band: 'balanced' }),
@@ -41,11 +41,11 @@ describe('explainScorecard', () => {
   })
 
   it('very_high 记为 excess 而非 up —— 过盛反损', () => {
-    const e = explainScorecard([feat({ id: 'face.nose.bridge', band: 'very_high' })])
-    const d = e.执行意志.drivers.find((x) => x.id === 'face.nose.bridge')
+    const e = explainScorecard([feat({ id: 'bone.mandible', band: 'very_high' })])
+    const d = e.执行意志.drivers.find((x) => x.id === 'bone.mandible')
     expect(d?.direction).toBe('excess')
     // high 才是纯粹的推高
-    const e2 = explainScorecard([feat({ id: 'face.nose.bridge', band: 'high' })])
+    const e2 = explainScorecard([feat({ id: 'bone.mandible', band: 'high' })])
     expect(e2.执行意志.drivers[0].direction).toBe('up')
   })
 
@@ -65,6 +65,18 @@ describe('explainScorecard', () => {
     expect(e.人际情感.neutralFallback).toBe(false)
   })
 
+  it('列入 evidenceOnly 的项完全不进星级 —— 判线站不住的项不许影响星数', () => {
+    // face.nose.bridge 的判线离实测量级 11–52 倍（见 core/evidenceOnly.ts），
+    // 若它仍带权重 3 参与执行意志，一条错判就会把每个人的同一维度一起推高。
+    const withBridge = explainScorecard([
+      feat({ id: 'face.nose.bridge', band: 'high' }),
+      feat({ id: 'face.brow.tail', band: 'low' }),
+    ])
+    const withoutBridge = explainScorecard([feat({ id: 'face.brow.tail', band: 'low' })])
+    expect(withBridge.执行意志.stars).toBe(withoutBridge.执行意志.stars)
+    expect(withBridge.执行意志.drivers.map((d) => d.id)).not.toContain('face.nose.bridge')
+  })
+
   it('没有特征的维度标记为中性回落，星级为 3', () => {
     const e = explainScorecard([])
     for (const dim of SCORE_DIMENSIONS) {
@@ -75,13 +87,13 @@ describe('explainScorecard', () => {
   })
 
   it('驱动项按影响力降序，且带上释义与出处供 UI 展示', () => {
-    // face.nose.bridge 对执行意志权重 3，face.brow.tail 权重 2
+    // bone.mandible 对执行意志权重 3，face.brow.tail 权重 2
     const e = explainScorecard([
       feat({ id: 'face.brow.tail', band: 'very_low' }),
-      feat({ id: 'face.nose.bridge', band: 'very_low' }),
+      feat({ id: 'bone.mandible', band: 'very_low' }),
     ])
     const ids = e.执行意志.drivers.map((d) => d.id)
-    expect(ids).toEqual(['face.nose.bridge', 'face.brow.tail'])
+    expect(ids).toEqual(['bone.mandible', 'face.brow.tail'])
     for (const d of e.执行意志.drivers) {
       expect(d.meaning).toBeTruthy()
       expect(d.label).toBeTruthy()
@@ -90,7 +102,7 @@ describe('explainScorecard', () => {
 
   it('置信度低的特征影响力更小', () => {
     const e = explainScorecard([
-      feat({ id: 'face.nose.bridge', band: 'very_low', confidence: 0.4 }),
+      feat({ id: 'bone.mandible', band: 'very_low', confidence: 0.4 }),
       feat({ id: 'face.brow.tail', band: 'very_low', confidence: 1 }),
     ])
     // 权重 3×0.4=1.2 < 2×1=2，低置信度把高权重项压了下去
@@ -100,7 +112,7 @@ describe('explainScorecard', () => {
   it('只取前 N 条', () => {
     const e = explainScorecard(
       [
-        feat({ id: 'face.nose.bridge', band: 'low' }),
+        feat({ id: 'bone.mandible', band: 'low' }),
         feat({ id: 'face.brow.tail', band: 'low' }),
         feat({ id: 'face.nose.root', band: 'low' }),
         feat({ id: 'face.eye.sclera', band: 'low' }),

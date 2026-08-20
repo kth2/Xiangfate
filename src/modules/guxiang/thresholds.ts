@@ -9,7 +9,8 @@ export const T = {
   /** 颧宽 ÷ IOD。规范脸 1.85 左右 */
   zygoWidth: { veryLo: 1.6, lo: 1.72, hi: 1.98, veryHi: 2.12 } satisfies BandSpec,
   /** 颧突出度 0–1 */
-  zygoProminence: { veryLo: 0.25, lo: 0.38, hi: 0.66, veryHi: 0.8 } satisfies BandSpec,
+  /** 收窄至 ±15%（原 ±26.9%，中和档吃掉自身输出范围的一半以上）。CALIBRATE */
+  zygoProminence: { veryLo: 0.37, lo: 0.44, hi: 0.60, veryHi: 0.69 } satisfies BandSpec,
   /** 左右颧高差 ÷ IOD，超过判为不对称 */
   zygoAsymTol: 0.02,
   /** 颧区轮廓锐度 0–1，高 = 骨露少肉 */
@@ -38,7 +39,8 @@ export const T = {
   templeRatio: { veryLo: 0.82, lo: 0.88, hi: 1.0, veryHi: 1.08 } satisfies BandSpec,
 
   /** 眉弓突出 0–1 */
-  browRidge: { veryLo: 0.2, lo: 0.32, hi: 0.6, veryHi: 0.75 } satisfies BandSpec,
+  /** 收窄至 ±15%（原 ±30.4%）。CALIBRATE */
+  browRidge: { veryLo: 0.33, lo: 0.39, hi: 0.53, veryHi: 0.61 } satisfies BandSpec,
 
   /** 骨肉比。传统以「骨肉相称」为最佳 */
   boneFlesh: { boneHeavy: 0.6, fleshHeavy: 0.4 },

@@ -42,9 +42,11 @@ export const T = {
   },
 
   /** 站姿开合：踝距 ÷ 肩宽 */
-  stance: { veryLo: 0.25, lo: 0.4, hi: 0.9, veryHi: 1.1 } satisfies BandSpec,
-  stanceWide: 0.9,
-  stanceNarrow: 0.4,
+  /** 收窄至 ±15%（原 ±38.5%）。CALIBRATE */
+  stance: { veryLo: 0.48, lo: 0.55, hi: 0.75, veryHi: 0.86 } satisfies BandSpec,
+  /** 原值 0.9 / 0.4 是旧档位的 hi / lo，随 stance 收窄一起内移 */
+  stanceWide: 0.75,
+  stanceNarrow: 0.55,
 
   /** 体型三型的软分类判据。CALIBRATE */
   somatotype: {

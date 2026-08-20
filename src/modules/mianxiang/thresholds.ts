@@ -30,6 +30,27 @@
 
 import type { BandSpec } from '@/core/band'
 
+/**
+ * ── 带宽收窄（2026-08）─────────────────────────────────────
+ * 差异化审计（src/dev/__tests__/differentiation.test.ts）量了一件事：
+ * 归一化到 0–1 的明暗/深度类指标，中和区半宽普遍在 ±26%–±40%，
+ * 也就是中和档一口吃掉了这些指标**自己输出范围的一半以上**。
+ * 后果是两端四档形同装饰：这些特征照样占报告篇幅、照样占星级权重，
+ * 却对每个人给同一个判断。
+ *
+ * 于是把这一类统一收到 ±15%。这**不是校准** —— 没有人群分布可依，
+ * ±15% 仍是工程判断，只是比 ±30% 少错一些：至少两端档位变得可达。
+ * 标了 CALIBRATE 的项目仍然待校准，收窄不代表定案。
+ *
+ * 比例类（长度之比）不动：它们本来就在 ±7%–±12%，与人体测量学文献里
+ * 4%–7% 的离散度同一量级。
+ *
+ * 中心在 0 附近的带符号量（cornerLift、canthalTilt）也不动：
+ * 「半宽 ÷ 中心」对它们没有意义，实测两张脸分别落 very_high / balanced，
+ * 本来就能区分人。审计里那两个夸张的百分比是除以近零中心的假象。
+ * ────────────────────────────────────────────────────────
+ */
+
 /** 围绕中心值造一个五档区间：balanced = center×[1-a, 1+a]，极端档 = ×[1-b, 1+b] */
 function around(center: number, a: number, b: number): BandSpec {
   return {
@@ -56,8 +77,15 @@ export const HAIRLINE_FACTOR = 2.22
 export const T = {
   /** 三停：修正后单停占比，理想各 1/3 */
   court: { veryLo: 0.26, lo: 0.30, hi: 0.37, veryHi: 0.41 } satisfies BandSpec,
-  /** 三停「平均」的判定：两两最大差值 ≤ 此值。CALIBRATE */
-  courtBalanceTol: 0.05,
+  /**
+   * 三停「平均」的判定：两两最大差值 ≤ 此值。
+   *
+   * 原值 0.05 下有 78% 的人判「三停平均」并拿到贵格断语 —— 传统里三停匀停
+   * 本该是一件值得一提的事，不该是默认值。实测 maxDiff：规范脸 0.010、
+   * 真人脸夹具 0.025，收到 0.03 让「三停平均」回到少数，
+   * 同时让「天庭饱满/中停丰隆/地阁方圆」这一支真正有机会出现。CALIBRATE
+   */
+  courtBalanceTol: 0.03,
 
   /** 五眼：脸宽 ÷ 单眼宽。规范脸 5.98（传统理想 5.0，实际人脸更宽） */
   fiveEye: around(5.98, 0.08, 0.15),
@@ -68,13 +96,13 @@ export const T = {
   browLen: around(1.74, 0.07, 0.15),
   /** 「眉长过目」的判线：明显超过规范脸 */
   browOverEye: 1.86,
-  /** 眉弯曲度（矢高÷弦长）。CALIBRATE —— 规范脸的眉下缘偏平 */
-  browCurve: { veryLo: 0.04, lo: 0.06, hi: 0.14, veryHi: 0.2 } satisfies BandSpec,
+  /** 眉弯曲度（矢高÷弦长）。实测 0.124/0.148，收窄至约 ±15%。CALIBRATE */
+  browCurve: { veryLo: 0.09, lo: 0.115, hi: 0.155, veryHi: 0.185 } satisfies BandSpec,
   browStraight: 0.06,
   browCrescentLo: 0.1,
   browCrescentHi: 0.2,
-  /** 眉毛浓密度（眉区暗像素占比）。像素类指标，规范脸无参照，CALIBRATE */
-  browDensity: { veryLo: 0.22, lo: 0.3, hi: 0.55, veryHi: 0.7 } satisfies BandSpec,
+  /** 眉毛浓密度（眉区暗像素占比）。像素类指标，规范脸无参照，收窄至 ±15%。CALIBRATE */
+  browDensity: { veryLo: 0.28, lo: 0.36, hi: 0.49, veryHi: 0.6 } satisfies BandSpec,
   /**
    * 印堂宽 ÷ 单眼宽。
    *
@@ -90,7 +118,7 @@ export const T = {
    *
    * 现按本文件既定方法（以规范脸实测值为中和中心）重设中心，带宽不变。
    */
-  browGap: around(0.943, 0.12, 0.24),
+  browGap: around(0.943, 0.08, 0.18),
   /** 「印堂偏窄」的硬判线，沿用原来相对中心的位置（0.44/0.53 ≈ 0.83） */
   browGapNarrow: 0.78,
 
@@ -105,20 +133,38 @@ export const T = {
   /** 巩膜暴露（三白眼判定）。CALIBRATE */
   scleraShow: 0.12,
 
+  /**
+   * 虹膜可见度 = 可见虹膜高 ÷ 虹膜直径（「眼神清明 / 含蓄」的判据）。
+   *
+   * 原判线写在 rules 里：lo=0.62、hi=0.85。那是照传统「目宜露神」的语感定的，
+   * 不是照测量定的 —— 人的睑裂高普遍**小于**虹膜直径（虹膜约 11.7mm、
+   * 睑裂高约 9–11mm），于是这个比值天然压在 0.6 上下：
+   * 规范脸实测 0.588、真人脸夹具 0.587，两张都在中和档下沿之外。
+   * 后果是凡是测过的人都判「眼神含蓄」，都拿到忌相「目光藏 —— 城府较深」，
+   * 而贵格「目光清明」（需 ≥0.85）在解剖上几乎不可能达到。
+   *
+   * 现按实测值重设中心并收窄。⚠️ N=2，仍是待校准项：
+   * 这一改只是把「人人城府深」换成一个能区分人的分布，不等于定案。
+   */
+  openness: around(0.588, 0.08, 0.18),
+
   /** 鼻长 ÷ IOD。规范脸 0.603 */
   noseLen: around(0.603, 0.08, 0.16),
   /** 鼻翼宽 ÷ IOD。规范脸 0.402 */
   alarWidth: around(0.402, 0.08, 0.16),
   alarFull: 0.434,
   /** 鼻梁偏移 ÷ IOD。规范脸 ≈0（中轴上），此项是「越小越直」，不用 around */
+  /**
+   * ⚠️ 已不再用于判断。该项列入 core/evidenceOnly（判线离实测量级 11–52 倍），
+   * 规则层只报数值。区间保留，供 differentiation 审计对照与将来重设参考。
+   */
   bridgeDeviation: { veryLo: 0.004, lo: 0.01, hi: 0.025, veryHi: 0.045 } satisfies BandSpec,
-  bridgeStraight: 0.025,
-  /** 山根深度突出，已在 metrics 中归一化到 0–1。CALIBRATE */
-  bridgeHeight: { veryLo: 0.25, lo: 0.38, hi: 0.65, veryHi: 0.8 } satisfies BandSpec,
-  /** 准头饱满度 0–1。CALIBRATE */
-  tipFullness: { veryLo: 0.28, lo: 0.4, hi: 0.68, veryHi: 0.82 } satisfies BandSpec,
-  /** 鼻孔暴露占比。CALIBRATE */
-  nostrilShow: { veryLo: 0.04, lo: 0.08, hi: 0.16, veryHi: 0.22 } satisfies BandSpec,
+  /** 山根深度突出，已在 metrics 中归一化到 0–1。实测 0.47/0.57，收窄至 ±15%。CALIBRATE */
+  bridgeHeight: { veryLo: 0.36, lo: 0.44, hi: 0.60, veryHi: 0.68 } satisfies BandSpec,
+  /** 准头饱满度 0–1。实测 0.41/0.61，收窄至 ±15%。CALIBRATE */
+  tipFullness: { veryLo: 0.39, lo: 0.46, hi: 0.62, veryHi: 0.71 } satisfies BandSpec,
+  /** 鼻孔暴露占比。收窄至 ±15%。CALIBRATE */
+  nostrilShow: { veryLo: 0.075, lo: 0.095, hi: 0.13, veryHi: 0.16 } satisfies BandSpec,
   nostrilHidden: 0.1,
   nostrilExposed: 0.22,
   /** 鼻翼宽 ÷ 鼻长。规范脸 0.667 */
@@ -145,8 +191,8 @@ export const T = {
   symmetryTol: 0.08,
   symmetryGood: 0.85,
 
-  /** 十二宫饱满度（明暗+z 推导，0–1）。CALIBRATE */
-  palaceFullness: { veryLo: 0.25, lo: 0.38, hi: 0.65, veryHi: 0.8 } satisfies BandSpec,
+  /** 十二宫饱满度（明暗+z 推导，0–1）。收窄至 ±15%。CALIBRATE */
+  palaceFullness: { veryLo: 0.36, lo: 0.44, hi: 0.60, veryHi: 0.68 } satisfies BandSpec,
   /** 田宅宫：眉眼间距 ÷ 单眼宽。规范脸 0.498 */
   tianzhai: around(0.498, 0.12, 0.25),
 
@@ -154,7 +200,7 @@ export const T = {
    * 卧蚕 / 泪堂（男女宫）。明暗起伏推断，受光照方向影响大，CALIBRATE
    * ridge：亮脊与其下暗沟的落差；hollow：眼下带比颊部暗多少
    */
-  woCanRidge: { veryLo: 0.05, lo: 0.09, hi: 0.17, veryHi: 0.24 } satisfies BandSpec,
+  woCanRidge: { veryLo: 0.095, lo: 0.11, hi: 0.15, veryHi: 0.18 } satisfies BandSpec,
   woCanFull: 0.17,
   tearTroughHollow: 0.14,
   /** 相对同脸平颊起伏的倍数。有基线时以它为准 —— 绝对值里混着光照方向 */
@@ -164,7 +210,7 @@ export const T = {
    * 法令纹。depth 是沿线局部暗度的中位数，continuity 是测得到纹沟的采样点占比。
    * 两者都过线才算「法令深长」—— 只深不连多半是鼻侧阴影，CALIBRATE
    */
-  nasolabial: { veryLo: 0.04, lo: 0.07, hi: 0.13, veryHi: 0.19 } satisfies BandSpec,
+  nasolabial: { veryLo: 0.075, lo: 0.085, hi: 0.115, veryHi: 0.14 } satisfies BandSpec,
   nasolabialDeep: 0.13,
   nasolabialFaint: 0.07,
   nasolabialContinuity: 0.5,

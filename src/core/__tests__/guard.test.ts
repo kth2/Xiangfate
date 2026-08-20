@@ -5,16 +5,31 @@
 
 import { describe, expect, it } from 'vitest'
 import { finalizeReport, guardReport, preflightQuestion } from '../guard'
-import { REQUIRED_SECTIONS } from '../guard.rules'
+import { CORE_SECTIONS } from '../guard.rules'
 import type { UnavailableItem } from '../types'
 
-/** 造一份结构合法、长度达标的报告，把待测句子插进「性格特质」 */
-function makeReport(injected = ''): string {
+/**
+ * 造一份结构合法、长度达标的报告，把待测句子插进「性格特质」。
+ *
+ * 骨架不再写死七段：核心段 + 一段专题，正好落在 SECTION_COUNT 的下限之上。
+ */
+const SAMPLE_SECTIONS = [
+  '特征识别',
+  '断语',
+  '性格特质',
+  '气度与格局',
+  '状态提示',
+  '发展建议',
+] as const
+
+function makeReport(injected = '', sections: readonly string[] = SAMPLE_SECTIONS): string {
   const filler = '三停比例大体匀称，传统相法认为这类格局的人一生节奏相对平稳，做事有自己的分寸。'
-  return REQUIRED_SECTIONS.map((s) => {
-    const body = s === '性格特质' ? `${injected}${filler.repeat(4)}` : filler.repeat(4)
-    return `## ${s}\n\n${body}`
-  }).join('\n\n')
+  return sections
+    .map((s) => {
+      const body = s === '性格特质' ? `${injected}${filler.repeat(4)}` : filler.repeat(4)
+      return `## ${s}\n\n${body}`
+    })
+    .join('\n\n')
 }
 
 const unavailable: UnavailableItem[] = [
@@ -22,17 +37,44 @@ const unavailable: UnavailableItem[] = [
 ]
 
 describe('结构校验', () => {
-  it('六段齐全的报告通过', () => {
+  it('核心段齐全的报告通过', () => {
     const r = guardReport(makeReport(), unavailable)
     expect(r.shouldRegenerate).toBe(false)
-    for (const s of REQUIRED_SECTIONS) expect(r.text).toContain(`## ${s}`)
+    for (const s of CORE_SECTIONS) expect(r.text).toContain(`## ${s}`)
   })
 
-  it('缺小节触发重生成', () => {
+  it('缺核心段触发重生成', () => {
     const partial = makeReport().replace('## 发展建议', '## 其他')
     const r = guardReport(partial, unavailable)
     expect(r.shouldRegenerate).toBe(true)
     expect(r.hits.some((h) => h.category === 'structure')).toBe(true)
+  })
+
+  it('给了提纲就按提纲逐段核对 —— 提纲里的专题段缺了也算缺', () => {
+    const sections = [...SAMPLE_SECTIONS, '财帛与积累']
+    // 报告只写了 SAMPLE_SECTIONS，少了提纲要求的「财帛与积累」
+    const r = guardReport(makeReport(), unavailable, { sections })
+    expect(r.shouldRegenerate).toBe(true)
+    expect(r.hits.some((h) => h.token.includes('财帛与积累'))).toBe(true)
+  })
+
+  it('提纲之外的段落被剔除，即使它在总白名单里', () => {
+    // 「运势节奏」是合法标题，但本次提纲没要它 —— 模型自己加回来就该剔掉
+    const withExtra = makeReport() + '\n\n## 运势节奏\n\n早年平顺，中年渐入佳境。'
+    const r = guardReport(withExtra, unavailable, { sections: SAMPLE_SECTIONS })
+    expect(r.text).not.toContain('## 运势节奏')
+  })
+
+  it('不给提纲时（追问、历史重放）旧七段式仍然合法', () => {
+    const legacy = makeReport('', ['特征识别', '断语', '性格特质', '能力倾向', '运势倾向', '状态提示', '发展建议'])
+    const r = guardReport(legacy, unavailable)
+    expect(r.shouldRegenerate).toBe(false)
+    expect(r.text).toContain('## 能力倾向')
+  })
+
+  it('段数越界触发重生成', () => {
+    const tooFew = makeReport('', ['特征识别', '断语'])
+    expect(guardReport(tooFew, unavailable).shouldRegenerate).toBe(true)
   })
 
   it('白名单外的小节被剔除', () => {
@@ -49,7 +91,7 @@ describe('结构校验', () => {
   })
 
   it('过短触发重生成', () => {
-    const short = REQUIRED_SECTIONS.map((s) => `## ${s}\n\n简。`).join('\n\n')
+    const short = SAMPLE_SECTIONS.map((s) => `## ${s}\n\n简。`).join('\n\n')
     expect(guardReport(short, unavailable).shouldRegenerate).toBe(true)
   })
 })
@@ -77,7 +119,7 @@ describe('内容过滤 —— 直接删句的类别', () => {
   it('删句不会破坏其余内容', () => {
     const r = finalizeReport(makeReport('这样的面相容易克夫。'), unavailable)
     expect(r.text).toContain('三停比例大体匀称')
-    for (const s of REQUIRED_SECTIONS) expect(r.text).toContain(`## ${s}`)
+    for (const s of CORE_SECTIONS) expect(r.text).toContain(`## ${s}`)
   })
 })
 
@@ -137,7 +179,7 @@ describe('JSON 字段名泄漏', () => {
 
 describe('空节兜底', () => {
   it('内容被删光的小节换成如实说明，而不是留空标题', () => {
-    const bad = REQUIRED_SECTIONS.map((s) =>
+    const bad = SAMPLE_SECTIONS.map((s) =>
       s === '状态提示' ? `## ${s}\n\n气色发黄说明肝胆有问题。` : `## ${s}\n\n${'平稳匀称，节奏得当。'.repeat(8)}`,
     ).join('\n\n')
     const r = finalizeReport(bad, unavailable)
