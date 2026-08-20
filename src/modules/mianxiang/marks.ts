@@ -45,6 +45,38 @@ export type MolePosition =
   | '腮'
   | '面颊'
 
+/**
+ * 位置 → id 片段。痣按位置拆成独立特征后，每个位置要有一个稳定的英文 id。
+ *
+ * 为什么要拆 —— 原来所有痣压成一条 `face.mole`（categorical，标签动态拼成
+ * 「印堂、颧见痣」）。相理却是按位置分的：印堂见痣主运途多阻，准头见痣主财帛易散，
+ * 眼尾见痣主感情波折 —— 三件不同的事，压成一条就没法各归各的维度，
+ * 于是这一项在五维星级里干脆没有权重（给任何一个维度都是瞎凑）。
+ * 拆开之后每个位置各挂各的维度，也各出各自的断语。
+ *
+ * ⚠️ 这张表必须与 MolePosition 一一对应；漏一个位置，那个位置的痣就没有 id。
+ * src/core/__tests__/weights.test.ts 会检查每个 slug 都有权重。
+ */
+export const MOLE_SLUG: Record<MolePosition, string> = {
+  印堂: 'yintang',
+  额中: 'ezhong',
+  额角: 'ejiao',
+  眉: 'mei',
+  眼尾: 'yanwei',
+  眼下: 'yanxia',
+  山根: 'shangen',
+  鼻梁: 'biliang',
+  准头: 'zhuntou',
+  鼻翼: 'biyi',
+  颧: 'quan',
+  人中: 'renzhong',
+  唇周: 'chunzhou',
+  法令: 'faling',
+  地阁: 'dige',
+  腮: 'sai',
+  面颊: 'mianjia',
+}
+
 export interface MoleResult {
   moles: Mole[]
   /** 检测不可用时给出原因，供 unavailable 如实说明 */

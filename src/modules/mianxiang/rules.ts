@@ -27,7 +27,7 @@ import type {
   UnavailableItem,
 } from '@/core/types'
 import type { ComplexionResult } from '@/core/color'
-import type { EyeBagResult, MoleResult, NasolabialResult } from './marks'
+import { MOLE_SLUG, type EyeBagResult, type MolePosition, type MoleResult, type NasolabialResult } from './marks'
 import type { FaceMetrics, Side } from './metrics'
 import { T } from './thresholds'
 
@@ -536,22 +536,49 @@ export function applyFaceRules(input: RuleInput): RuleOutput {
   }
 
   /* ============ 痣 ============ */
+  /**
+   * 按位置逐条出特征，不再压成一条 `face.mole`。
+   *
+   * 相理是按位置分的：印堂见痣主运途多阻、准头见痣主财帛易散、
+   * 眼尾见痣主感情波折 —— 三件不同的事。压成一条 categorical 的后果是
+   * 它在五维星级里根本没有权重（给任何一个维度都是丢掉位置之后瞎凑），
+   * 于是测出来的东西到不了星级。拆开之后各归各的宫、各挂各的维度。
+   *
+   * 档位给偏离档而不是 categorical —— 传统相术里痣基本都作忌处论
+   * （见 MOLE_MEANING，无一条是吉），categorical 在星级里是不参与的，
+   * 那就等于测到了也不算。显痣（大而深）记 very_low，其余记 low。
+   */
   if (moles && !moles.failed) {
     const solid = moles.moles.filter((mo) => mo.contrast >= T.moleContrast)
     if (solid.length) {
-      const positions = solid.map((mo) => mo.position)
-      push(
-        'face.mole', '纹痣', `${positions.join('、')}见痣`, 'categorical',
-        positions.join('、'), 'inferred', conf('density'),
-        solid
-          .map((mo) => `${mo.position}（直径约 IOD 的 ${(mo.sizeRatio * 100).toFixed(1)}%，较周围肤色暗 ${(mo.contrast * 100).toFixed(0)}%）`)
-          .join('；'),
-        solid.map((mo) => MOLE_MEANING[mo.position]).join('；'),
-        '麻衣神相',
-      )
+      // 同一位置可能有多颗，合成一条：取最明显的那颗定档，颗数写进证据
+      const byPosition = new Map<MolePosition, typeof solid>()
+      for (const mo of solid) {
+        const list = byPosition.get(mo.position) ?? []
+        list.push(mo)
+        byPosition.set(mo.position, list)
+      }
+
+      for (const [position, group] of byPosition) {
+        const strongest = group.reduce((a, b) => (b.contrast > a.contrast ? b : a))
+        const prominent =
+          strongest.contrast >= T.moleProminentContrast &&
+          strongest.sizeRatio >= T.moleProminentSize
+        push(
+          `face.mole.${MOLE_SLUG[position]}`, '纹痣', `${position}见痣`,
+          prominent ? 'very_low' : 'low',
+          round(strongest.contrast), 'inferred', conf('density'),
+          `${position}检出${group.length > 1 ? `${group.length} 颗痣，最明显的一颗` : '痣'}` +
+            `直径约 IOD 的 ${(strongest.sizeRatio * 100).toFixed(1)}%，较周围肤色暗 ${(strongest.contrast * 100).toFixed(0)}%` +
+            `${prominent ? '，属显痣' : ''}`,
+          MOLE_MEANING[position],
+          '麻衣神相',
+        )
+      }
     } else {
+      // 无痣是中和态：不承载偏离信号，因此也不进星级（见 core/scorecard.ts 的豁免说明）
       push(
-        'face.mole', '纹痣', '面上无显痣', 'balanced', 0, 'inferred', conf('density'),
+        'face.mole.none', '纹痣', '面上无显痣', 'balanced', 0, 'inferred', conf('density'),
         '面部皮肤区域未检出足够明显的深色斑点',
         '面无显痣，传统视为气色不受遮挡，各宫论断以本形为准',
         '麻衣神相',
@@ -673,7 +700,7 @@ const FIVE_MEANING: Record<FiveElement | '兼形', string> = {
  * 痣按宫位断，这是传统相法里断语最密的一块。
  * 与其他文案一样按原意写 —— 该说「多阻」就说「多阻」。
  */
-const MOLE_MEANING: Record<import('./marks').MolePosition, string> = {
+const MOLE_MEANING: Record<MolePosition, string> = {
   印堂: '印堂见痣，传统主运途多阻、心事难解，三十前后尤须自持',
   额中: '额上见痣，传统主早年离祖、少得亲荫，凡事靠自己开局',
   额角: '迁移宫见痣，传统主奔波在外、居处多迁',

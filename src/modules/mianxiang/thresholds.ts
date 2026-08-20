@@ -220,6 +220,15 @@ export const T = {
 
   /** 痣：相对周围肤色的暗度落差，低于此值不认为是痣。CALIBRATE */
   moleContrast: 0.16,
+  /**
+   * 「显痣」的判线：又大又深的才算，记 very_low；其余记 low。
+   *
+   * 传统相术里痣论轻重看的是「显」与「隐」—— 隐痣不作重断。
+   * 两条都过线才算显，只深不大多半是痘印或色斑残留。CALIBRATE
+   */
+  moleProminentContrast: 0.26,
+  /** 直径 ÷ IOD。约合成年人脸上 1.5mm 以上的痣 */
+  moleProminentSize: 0.025,
 
   /** 气色。像素类指标，CALIBRATE */
   complexion: {

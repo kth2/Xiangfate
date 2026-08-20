@@ -20,6 +20,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
 import { isEvidenceOnly } from '../evidenceOnly'
+import { MOLE_SLUG } from '@/modules/mianxiang/marks'
 import { computeScorecard, WEIGHT_KEYS as ALL_KEYS, weightsForTest as weightsFor } from '../scorecard'
 import { SCORE_DIMENSIONS, type AnalysisType, type Band, type FeatureItem, type ScoreDimension } from '../types'
 
@@ -40,6 +41,8 @@ const TEMPLATE_EXPANSIONS: Record<string, string[]> = {
   'MOUNT_ID[key]': ['jupiter', 'saturn', 'apollo', 'mercury', 'venus', 'moon', 'mars'],
   // 九骨里不可观测的那几根，只作为 unavailable 出现，从不是 feature
   bone: ['枕骨', '顶骨', '耳后骨'],
+  // 痣按位置分列后的 id 片段，与 marks.ts 的 MOLE_SLUG 同源
+  'MOLE_SLUG[position]': Object.values(MOLE_SLUG),
 }
 
 function readRules(module: string): string {
@@ -128,8 +131,8 @@ const ALL_EMITTED = [...new Set(Object.values(EMITTED).flat())].sort()
  * 没有理由的项不许进这张表 —— 否则它会变成掩盖遗漏的地方。
  */
 const UNWEIGHTED_ON_PURPOSE: Record<string, string> = {
-  'face.mole':
-    '痣的相理按位置分（印堂见痣与颧见痣主的不是一件事），而这一项把所有位置压成一个 categorical 特征。挂任何维度都是丢掉位置信息之后瞎凑。要参与打分得先按位置拆开。',
+  'face.mole.none':
+    '「面上无显痣」是中和态，不承载偏离信号：它的档位是 balanced，进了星级也只贡献覆盖量而不贡献偏移。给它挂权重只会让「没有痣」看起来像一条测到的论据。',
 }
 
 /* ============================================================
@@ -219,13 +222,15 @@ describe('每一维都有足够的特征在撑', () => {
       'face.brow.tail',
       'face.nasolabial',
       'face.palace.nannv',
-      'face.mole',
       'face.complexion',
     ]
+    // 痣按位置分列后 id 是 face.mole.<slug>，整族都依赖像素
+    const isPixelDependent = (id: string) =>
+      PIXEL_DEPENDENT.includes(id) || id.startsWith('face.mole.')
     for (const dim of SCORE_DIMENSIONS) {
       const fs = breadth('mianxiang', dim)
       expect(fs.length, `面相「${dim}」只有 ${fs.length} 条`).toBeGreaterThanOrEqual(3)
-      const geometric = fs.filter((id) => !PIXEL_DEPENDENT.includes(id))
+      const geometric = fs.filter((id) => !isPixelDependent(id))
       expect(
         geometric.length,
         `面相「${dim}」的非像素类特征只有 ${geometric.length} 条：${fs.join('、')}`,
@@ -235,7 +240,40 @@ describe('每一维都有足够的特征在撑', () => {
 })
 
 /* ============================================================
-   3. 三停按停分列
+   3. 痣按位置分列
+   ============================================================ */
+
+describe('痣的每个位置都挂上了维度', () => {
+  it('MOLE_SLUG 的每个位置都有权重 —— 漏一个，那个位置的痣就到不了星级', () => {
+    const missing = Object.entries(MOLE_SLUG).filter(
+      ([, slug]) => !weightsFor(`face.mole.${slug}`),
+    )
+    expect(
+      missing.map(([pos]) => pos),
+      '这些位置的痣测得出来却没有权重',
+    ).toEqual([])
+  })
+
+  it('每个位置的权重都落在与该位置相称的维度上', () => {
+    // 抽查几个方向明确的：财帛类归根基福泽，感情类归人际情感，威令类归执行意志
+    expect(weightsFor('face.mole.zhuntou')?.根基福泽).toBeGreaterThan(0)
+    expect(weightsFor('face.mole.biyi')?.根基福泽).toBeGreaterThan(0)
+    expect(weightsFor('face.mole.yanwei')?.人际情感).toBeGreaterThan(0)
+    expect(weightsFor('face.mole.chunzhou')?.人际情感).toBeGreaterThan(0)
+    expect(weightsFor('face.mole.faling')?.执行意志).toBeGreaterThan(0)
+  })
+
+  it('没有哪个位置的痣一条权重都不到 2 个维度以上 —— 单颗痣不该主导一维', () => {
+    for (const slug of Object.values(MOLE_SLUG)) {
+      const w = weightsFor(`face.mole.${slug}`)!
+      const total = Object.values(w).reduce((a, b) => a + (b ?? 0), 0)
+      expect(total, `face.mole.${slug} 权重合计 ${total}，过重`).toBeLessThanOrEqual(2)
+    }
+  })
+})
+
+/* ============================================================
+   4. 三停按停分列
    ============================================================ */
 
 describe('三停的权重按停分列', () => {

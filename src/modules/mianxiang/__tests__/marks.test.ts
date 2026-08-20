@@ -8,7 +8,16 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { detectMoles, measureEyeBag, measureNasolabial } from '../marks'
+import {
+  detectMoles,
+  measureEyeBag,
+  measureNasolabial,
+  MOLE_SLUG,
+  type MolePosition,
+} from '../marks'
+import { computeFaceMetrics } from '../metrics'
+import { applyFaceRules } from '../rules'
+import { computeScorecard, explainScorecard } from '@/core/scorecard'
 import { EYE, IOD_PAIR, MOUTH, NOSE } from '../landmarks'
 import { makeImageData, mulberry32, projectCanonical } from './canonical'
 
@@ -104,6 +113,163 @@ describe('痣检测', () => {
     const r = detectMoles(img, LM)
     expect(r.failed).toBe('too_noisy')
     expect(r.moles).toHaveLength(0)
+  })
+
+  it('MOLE_SLUG 与 MolePosition 一一对应，没有漏配也没有多余项', () => {
+    // 漏一个位置，那个位置的痣就没有 id，规则层会拼出 `face.mole.undefined`
+    const slugs = Object.values(MOLE_SLUG)
+    expect(new Set(slugs).size, 'slug 有重复，两个位置会撞到同一个 id').toBe(slugs.length)
+    for (const slug of slugs) expect(slug).toMatch(/^[a-z]+$/)
+  })
+})
+
+/**
+ * 痣按位置分列的全链路：画一颗痣 → 检出 → 规则层出对应位置的特征 → 进星级。
+ *
+ * 原来所有痣压成一条 `face.mole`（categorical），在五维星级里没有权重，
+ * 于是测出来的东西到不了星级。这一组盯住拆分后的每一环。
+ */
+describe('痣 → 特征 → 星级', () => {
+  const ruleInput = (img: ImageData | null) => ({
+    m: computeFaceMetrics(LM, W, H),
+    qualityFactor: 0.9,
+    complexionFactor: 0,
+    detectorScore: 0.95,
+    complexion: null,
+    browPixels: null,
+    foreheadOccluded: false,
+    moles: img ? detectMoles(img, LM) : null,
+    eyeBags: null,
+    nasolabial: null,
+  })
+
+  function moleFeatures(img: ImageData) {
+    return applyFaceRules(ruleInput(img)).features.filter((f) => f.id.startsWith('face.mole'))
+  }
+
+  it('两处不同位置的痣出两条独立特征，各带自己的相理', () => {
+    const img = skinFace()
+    paintDot(img, LM[4].x, LM[4].y, Math.max(2, iodPx * 0.02)) // 准头
+    paintDot(img, LM[205].x, LM[205].y, Math.max(2, iodPx * 0.02)) // 颧
+    const fs = moleFeatures(img)
+    expect(fs.map((f) => f.id).sort()).toEqual(['face.mole.quan', 'face.mole.zhuntou'])
+    const zhuntou = fs.find((f) => f.id === 'face.mole.zhuntou')!
+    const quan = fs.find((f) => f.id === 'face.mole.quan')!
+    expect(zhuntou.label).toBe('准头见痣')
+    expect(zhuntou.meaning).toContain('财帛')
+    expect(quan.label).toBe('颧见痣')
+    expect(quan.meaning).toContain('是非')
+  })
+
+  it('档位是偏离档而非 categorical —— categorical 在星级里根本不参与', () => {
+    const img = skinFace()
+    paintDot(img, LM[4].x, LM[4].y, Math.max(2, iodPx * 0.02))
+    const f = moleFeatures(img).find((x) => x.id === 'face.mole.zhuntou')!
+    expect(['low', 'very_low']).toContain(f.band)
+  })
+
+  it('准头见痣真的把根基福泽压下来了', () => {
+    const clean = applyFaceRules(ruleInput(skinFace()))
+    const img = skinFace()
+    paintDot(img, LM[4].x, LM[4].y, Math.max(2, iodPx * 0.02))
+    const withMole = applyFaceRules(ruleInput(img))
+
+    const before = computeScorecard(clean.features)
+    const after = computeScorecard(withMole.features)
+    // 准头见痣「主财帛易散」→ 根基福泽
+    expect(after.根基福泽).toBeLessThanOrEqual(before.根基福泽)
+    // 且该条确实成了这一维的驱动项，用户点开能看到它
+    const drivers = explainScorecard(withMole.features).根基福泽.drivers.map((d) => d.id)
+    expect(drivers).toContain('face.mole.zhuntou')
+  })
+
+  it('干净的脸出「面上无显痣」，且它不进星级偏移', () => {
+    const clean = skinFace()
+    const fs = moleFeatures(clean)
+    expect(fs.map((f) => f.id)).toEqual(['face.mole.none'])
+    expect(fs[0].band).toBe('balanced')
+    // balanced 的偏移为 0，因此不该出现在任何一维的驱动项里
+    const explain = explainScorecard(applyFaceRules(ruleInput(clean)).features)
+    for (const dim of Object.values(explain)) {
+      expect(dim.drivers.map((d) => d.id)).not.toContain('face.mole.none')
+    }
+  })
+
+  /**
+   * 分档与分组这两段逻辑不拿画图去试 —— 用像素凑一颗「刚好落在判线下方」的痣
+   * 很难稳定，而且真正要测的是规则层怎么处理检出结果，不是检测器本身
+   * （那部分上面「痣检测」一组已经在测）。这里直接给规则层构造检出结果。
+   */
+  const mole = (position: MolePosition, contrast: number, sizeRatio: number) => ({
+    x: 0.5,
+    y: 0.5,
+    sizeRatio,
+    contrast,
+    position,
+  })
+
+  function featuresFrom(moles: ReturnType<typeof mole>[]) {
+    return applyFaceRules({
+      ...ruleInput(null),
+      moles: { moles, failed: null },
+    }).features.filter((f) => f.id.startsWith('face.mole'))
+  }
+
+  it('隐痣记 low，显痣记 very_low —— 传统上隐痣不作重断', () => {
+    // 判线：contrast ≥ 0.26 且 sizeRatio ≥ 0.025 才算显
+    const faint = featuresFrom([mole('准头', 0.2, 0.015)])
+    expect(faint[0].band).toBe('low')
+    expect(faint[0].evidence).not.toContain('属显痣')
+
+    const prominent = featuresFrom([mole('准头', 0.35, 0.04)])
+    expect(prominent[0].band).toBe('very_low')
+    expect(prominent[0].evidence).toContain('属显痣')
+
+    // 只深不大、或只大不深，都不算显
+    expect(featuresFrom([mole('准头', 0.35, 0.015)])[0].band).toBe('low')
+    expect(featuresFrom([mole('准头', 0.2, 0.04)])[0].band).toBe('low')
+  })
+
+  it('同一位置多颗合成一条，取最明显的定档，颗数写进证据', () => {
+    const fs = featuresFrom([
+      mole('面颊', 0.18, 0.02),
+      mole('面颊', 0.35, 0.04),
+      mole('面颊', 0.2, 0.018),
+    ])
+    // 不能出三条同 id —— 重复 id 会让报告与断语出现三条一样的
+    expect(fs).toHaveLength(1)
+    expect(fs[0].id).toBe('face.mole.mianjia')
+    expect(fs[0].evidence).toContain('3 颗痣')
+    // 最明显的那颗是显痣，整条就按显痣论
+    expect(fs[0].band).toBe('very_low')
+  })
+
+  it('不同位置各出一条，互不合并', () => {
+    const fs = featuresFrom([
+      mole('准头', 0.3, 0.03),
+      mole('颧', 0.3, 0.03),
+      mole('眼尾', 0.3, 0.03),
+    ])
+    expect(fs.map((f) => f.id).sort()).toEqual([
+      'face.mole.quan',
+      'face.mole.yanwei',
+      'face.mole.zhuntou',
+    ])
+  })
+
+  it('低于痣判线的斑点不出特征，回落到「面上无显痣」', () => {
+    // T.moleContrast = 0.16
+    const fs = featuresFrom([mole('准头', 0.1, 0.02)])
+    expect(fs.map((f) => f.id)).toEqual(['face.mole.none'])
+  })
+
+  it('检测失败时按 unavailable 处理，不硬出一条痣特征', () => {
+    const out = applyFaceRules({
+      ...ruleInput(null),
+      moles: { moles: [], failed: 'too_noisy' as const },
+    })
+    expect(out.features.some((f) => f.id.startsWith('face.mole'))).toBe(false)
+    expect(out.unavailable.some((u) => u.id === 'face.mole')).toBe(true)
   })
 })
 

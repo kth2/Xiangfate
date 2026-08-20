@@ -49,23 +49,34 @@ describe('断语提取', () => {
     expect(collectVerdicts([feat({ label: '五眼匀称' }), feat({ label: '眉浓淡适中' })])).toEqual([])
   })
 
-  it('痣按位置动态生成，用规则给的原文', () => {
+  it('痣按位置各出一条断语，用规则给的原文', () => {
+    // 规则层按位置分列（face.mole.<slug>），因此一张脸上两处痣就是两条断语 ——
+    // 术士当面看相也是逐处点名，不会把它们并成一句。
     const vs = collectVerdicts([
       feat({
-        id: 'face.mole',
-        label: '印堂、颧见痣',
-        meaning: '印堂见痣，主运途多阻；颧上见痣，主是非缠身',
+        id: 'face.mole.yintang',
+        label: '印堂见痣',
+        meaning: '印堂见痣，传统主运途多阻、心事难解',
+        status: 'inferred',
+      }),
+      feat({
+        id: 'face.mole.quan',
+        label: '颧见痣',
+        meaning: '颧上见痣，传统主权柄受挫、是非缠身',
         status: 'inferred',
       }),
     ])
-    expect(vs).toHaveLength(1)
-    expect(vs[0].tone).toBe('ji')
-    expect(vs[0].text).toContain('运途多阻')
-    expect(vs[0].inferred).toBe(true)
+    expect(vs).toHaveLength(2)
+    expect(vs.every((v) => v.tone === 'ji')).toBe(true)
+    expect(vs.every((v) => v.inferred)).toBe(true)
+    expect(vs.map((v) => v.text).join('')).toContain('运途多阻')
+    expect(vs.map((v) => v.text).join('')).toContain('是非缠身')
+    // featureId 要能回溯到具体位置，而不是笼统的 face.mole
+    expect(vs.map((v) => v.featureId).sort()).toEqual(['face.mole.quan', 'face.mole.yintang'])
   })
 
   it('「面上无显痣」不是断语', () => {
-    expect(collectVerdicts([feat({ id: 'face.mole', label: '面上无显痣' })])).toEqual([])
+    expect(collectVerdicts([feat({ id: 'face.mole.none', label: '面上无显痣' })])).toEqual([])
   })
 
   it('推估项被标出来，展开时要带一句', () => {
