@@ -195,6 +195,37 @@ describe('每个分支都能命中', () => {
     }
   })
 
+  /**
+   * 只由一个数值分量决定的组合，判线之间不得留缝。
+   *
+   * 这条是实测逼出来的：`config.face.boneFlesh` 初稿写的是
+   * 骨胜 ≥0.68 / 肉胜 ≤0.32 / 相称 0.4–0.6，0.32–0.4 与 0.6–0.68 两段没人管 ——
+   * 值落进去就 no_branch，等于「这张脸的骨肉测出来了，但我们不说」。
+   * 分档判断本该全覆盖，那两段缺的是覆盖，不是数据。
+   */
+  it('单分量数值组合：0–1 全程都判得出，不留无人认领的缝', () => {
+    const numericOnly = FACE_CONFIGURATIONS.filter(
+      (spec) =>
+        spec.components.length === 1 &&
+        spec.branches.every(
+          (b) =>
+            b.when.length === 1 &&
+            b.when[0].featureId === spec.components[0] &&
+            b.when[0].bands === undefined &&
+            (b.when[0].gte !== undefined || b.when[0].lte !== undefined),
+        ),
+    )
+    expect(numericOnly.length, '没有单分量数值组合，这条测试在空转').toBeGreaterThan(0)
+
+    for (const spec of numericOnly) {
+      for (let step = 0; step <= 200; step++) {
+        const value = step / 200
+        const r = detectConfigurations([feat(spec.components[0], 'categorical', value)], [spec])
+        expect(r.detected.length, `${spec.id} 在 value=${value} 处无人认领`).toBe(1)
+      }
+    }
+  })
+
   it('分支顺序即优先级 —— 命中的绝不会是更靠后的那一支', () => {
     for (const spec of FACE_CONFIGURATIONS) {
       for (let i = 0; i < spec.branches.length; i++) {
