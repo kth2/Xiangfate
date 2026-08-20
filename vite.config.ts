@@ -48,6 +48,9 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // 上一版的预缓存不清掉会一直占着配额，且让「到底跑的哪一版」更难查。
+        // workbox 默认不清，必须显式打开
+        cleanupOutdatedCaches: true,
         // 只预缓存应用壳。MediaPipe 的 wasm（约 11.7MB）与 .task 模型（共约 17MB）
         // 都太大，一律改成按需的运行时缓存 —— 首屏不该为还没用到的相术类型买单
         globPatterns: ['**/*.{js,css,html,svg}'],

@@ -3,6 +3,7 @@ import { createBrowserRouter } from 'react-router'
 import { AppShell } from './ui/AppShell'
 import { Home } from './ui/pages/Home'
 import { Loading } from './ui/components/Loading'
+import { RouteError } from './ui/staleBuild'
 
 /**
  * 路由用 React Router 而非文档 06 里提过的 TanStack Router：
@@ -26,6 +27,9 @@ export const router = createBrowserRouter([
   {
     path: '/',
     element: <AppShell />,
+    // 分片加载失败会冒泡到这里。没有它就是 React Router 默认的
+    // 「Unexpected Application Error!」+ 堆栈，用户无从下手
+    errorElement: <RouteError />,
     children: [
       { index: true, element: <Home /> },
       { path: 'capture/:type', element: withSuspense(<Capture />) },
