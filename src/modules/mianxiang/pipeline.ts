@@ -7,6 +7,8 @@ import { partitionByConfidence, round } from '@/core/band'
 import { analyzeComplexion } from '@/core/color'
 import { assessQuality } from '@/core/quality'
 import { computeScorecard } from '@/core/scorecard'
+import { detectConfigurations } from '@/core/configuration'
+import { FACE_CONFIGURATIONS } from './configurations'
 import {
   DEFAULT_FORBID_TOPICS,
   SCHEMA_VERSION,
@@ -142,6 +144,14 @@ export function buildMianxiangEnvelope({
   // 3D 项同样要过置信度门槛，走同一个分流入口
   const partitioned3d = partitionByConfidence(face3d.features)
 
+  /**
+   * 组合成象。放在这里而不是 rules.ts —— 组合要同时看二维与三维两批特征，
+   * 而 rules.ts 手里只有二维那批。
+   * 只喂**过了置信度门槛**的项：门槛下的特征连单独立论都不许，更不该参与组合。
+   */
+  const allFeatures = [...features, ...partitioned3d.features]
+  const configurations = detectConfigurations(allFeatures, FACE_CONFIGURATIONS)
+
   return {
     schemaVersion: SCHEMA_VERSION,
     analysisType: 'mianxiang',
@@ -150,8 +160,9 @@ export function buildMianxiangEnvelope({
     locale: 'zh-CN',
     ...(subject ? { subject } : {}),
     capture: { shots: ['front'], quality },
-    features: [...features, ...partitioned3d.features],
+    features: allFeatures,
     derived,
+    configurations,
     raw: {
       normalizer: { type: 'IOD', valuePx: round(m.iodPx, 1) },
       metrics: {

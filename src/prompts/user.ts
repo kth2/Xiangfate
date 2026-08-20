@@ -3,6 +3,7 @@
  * 追问部分另注入 docs/xiangshu-qa-knowledge.md 的主题应对方向。
  */
 
+import { configurationBlock } from '@/core/configuration'
 import { buildOutline, type Outline } from '@/core/outline'
 import { ANSWER_STRUCTURE, detectTopics, TOPIC_GUIDES, TYPE_QA_NOTES } from '@/core/qa'
 import { explainScorecard } from '@/core/scorecard'
@@ -31,13 +32,17 @@ const HEAD: Record<AnalysisType, string> = {
 上停（发际线相关）的测量来自面部网格顶端，与真实发际线有偏差，
 因此该项置信度天然偏低，措辞请相应缓和。
 
-【关于 face3d.* 那批特征】
-id 以 face3d. 开头的是**三维度量**（规范帧下的隆起、面积、对称残差等），
-schema 2.0 新增。它们的用途是给既有论断提供数值依据，**不是新的断语**：
-  · 可以用它们的数字把话说实（「山根相对面平面前突 4.2% IOD」）
-  · **不要逐条罗列** —— 特征识别段仍只列几条关键的，其余融进正文
-  · 它们的 meaning 字段写的是量纲说明而非相理，不要照抄进报告
-  · 深度类一律为 inferred（弱透视 z 推出来的），措辞按推估处理`,
+【关于三维度量】
+规范帧下的隆起、面积、对称残差那一批（id 以 face3d. 开头）**不会出现在下面的数据里**。
+它们的阈值尚未用真实人群校准，单独引用一个数字会显得比测量本身更有把握。
+
+它们没有被浪费 —— 而是作为【本次成象】里各条组合的判据在用：
+「五岳朝拱」「财库不收」「骨肉相称」这类**关系**才是它们站得住的说法。
+所以：
+  · 组合之象可以照【本次成象】给的象义讲，那是经组合规则判定的
+  · 组合证据链里标了「三维推导，此处不列数值」的环节，可以说它成立，
+    **不得编造数字** —— 你手上没有那个数字
+  · 三维推导一律按推估措辞（弱透视 z 推出来的）`,
 
   shouxiang: `【本次解读类型】手相
 
@@ -122,12 +127,30 @@ worldLandmarks（米制、原点在髋中心）计算，因此与拍摄距离和
  * 声明顺序已经把最常引用的量排在前面。
  */
 export function trimEnvelope(env: AnalysisEnvelope): Record<string, unknown> {
-  const { raw, policy: _policy, scorecard: _scorecard, ...rest } = env
+  const { raw, policy: _policy, scorecard: _scorecard, configurations: _cfg, ...rest } = env
   const trimmedRaw = raw?.metrics
     ? { normalizer: raw.normalizer, metrics: takeFirst(raw.metrics, 24) }
     : raw
-  return { ...rest, ...(trimmedRaw ? { raw: trimmedRaw } : {}) }
+  return {
+    ...rest,
+    // 三维度量整批不进 prompt —— 见下。configurations 另走 configurationBlock，
+    // 不重复塞进 JSON
+    features: rest.features.filter((f) => !isThreeD(f.id)),
+    ...(trimmedRaw ? { raw: trimmedRaw } : {}),
+  }
 }
+
+/**
+ * 三维度量不进 prompt 的 features。
+ *
+ * 这是「原始 face3d 数值不可引用」的**结构性**保证：模型拿不到那些数字，
+ * 就不可能引用它们 —— 比在 prompt 里叮嘱「请不要引用」可靠得多。
+ * 原来 HEAD 里写的是「可以用它们的数字把话说实」，恰好相反。
+ *
+ * 它们仍然进 envelope（UI 要用来逐层回溯），也仍然是组合判定的输入；
+ * 只是不再作为可直接引用的报告素材。
+ */
+const isThreeD = (id: string): boolean => id.startsWith('face3d.')
 
 function takeFirst(metrics: Record<string, unknown>, n: number): Record<string, unknown> {
   return Object.fromEntries(Object.entries(metrics).slice(0, n))
@@ -234,6 +257,8 @@ ${focus}
 ${outlineBlock(outline)}
 
 ${salienceBlock(outline)}
+
+${env.configurations ? configurationBlock(env.configurations) : ''}
 
 【结构化特征数据】
 ${JSON.stringify(trimEnvelope(env), null, 1)}

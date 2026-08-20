@@ -28,6 +28,8 @@ import { T as TH } from '@/modules/shouxiang/thresholds'
 import { T as TG } from '@/modules/guxiang/thresholds'
 import { T as TB } from '@/modules/tixiang/thresholds'
 import { buildOutline } from '@/core/outline'
+import { configurationBlock, detectConfigurations } from '@/core/configuration'
+import { FACE_CONFIGURATIONS } from '@/modules/mianxiang/configurations'
 import {
   auditBand,
   collectBandSpecs,
@@ -417,6 +419,100 @@ describe('报告提纲多样性', () => {
     const plain = buildOutline(features).sections
     const focused = buildOutline(features, ['想问财运与积累']).sections
     expect(focused).not.toEqual(plain)
+  })
+})
+
+/* ============================================================
+   6. 组合成象 —— 同一个测量值能否读出不同的象
+   ============================================================ */
+
+describe('组合成象的差异化', () => {
+  const results = FEATURE_SETS.map((f) => detectConfigurations(f, FACE_CONFIGURATIONS))
+
+  it('列出各象的命中率', () => {
+    const hits = new Map<string, number>()
+    for (const r of results) {
+      for (const d of r.detected) hits.set(`${d.name} · ${d.configuration}`, (hits.get(`${d.name} · ${d.configuration}`) ?? 0) + 1)
+    }
+    say('\n===== 组合成象命中率 =====')
+    for (const [k, v] of [...hits].sort((a, b) => b[1] - a[1])) {
+      say(`${((v / N) * 100).toFixed(0).padStart(4)}%  ${k}`)
+    }
+    const counts = results.map((r) => r.detected.length)
+    say(`每人成象数：均值 ${(counts.reduce((a, b) => a + b, 0) / N).toFixed(1)}（${Math.min(...counts)}–${Math.max(...counts)}）`)
+    say(`不同的成象组合：${new Set(results.map((r) => r.detected.map((d) => d.configuration).sort().join('|'))).size} 种 / ${N} 人`)
+  })
+
+  it('人群里同一条组合会落到不同的分支上 —— 不是人人同一个象', () => {
+    // 某条组合若在人群里只有一种分支命中，它就等于一句模板
+    const bySpec = new Map<string, Set<string>>()
+    for (const r of results) {
+      for (const d of r.detected) {
+        if (!bySpec.has(d.id)) bySpec.set(d.id, new Set())
+        bySpec.get(d.id)!.add(d.configuration)
+      }
+    }
+    const varying = [...bySpec].filter(([, set]) => set.size > 1)
+    say(`\n  落到多个分支的组合：${varying.map(([id, s]) => `${id}(${s.size})`).join('、') || '（无）'}`)
+    expect(varying.length).toBeGreaterThan(0)
+  })
+
+  /**
+   * 与断语那条同一个道理：一条象命中九成以上的人，它就等于报告模板的一部分。
+   *
+   * 这条守卫是实测逼出来的 —— 初版的「五岳」与「骨肉」两条组合正是这样：
+   * 判线建立在我对该度量自然取值的错误假设上，结果两张实测脸都命中同一支。
+   * 两条已整体摘除（见 configurations.ts 头部的「暂不收录」），
+   * 不是靠挪判线让它们看起来正常。
+   *
+   * ⚠️ 合成人群没有三维特征，因此这条只覆盖得到二维组合。
+   * 三维组合仍需真实样本才谈得上校准。
+   */
+  it('没有哪一象命中九成以上的人 —— 那就成了模板', () => {
+    const hits = new Map<string, number>()
+    for (const r of results) for (const d of r.detected) hits.set(d.configuration, (hits.get(d.configuration) ?? 0) + 1)
+    const nearUniversal = [...hits].filter(([, v]) => v / N >= 0.9).map(([k, v]) => `${k} ${((v / N) * 100).toFixed(0)}%`)
+    say(`\n  命中率 ≥90% 的象：${nearUniversal.join('、') || '（无）'}`)
+    expect(nearUniversal).toEqual([])
+  })
+
+  /**
+   * 验收标准里最关键的一条：**同样的单项测量，因周边组合不同而读出不同的象。**
+   *
+   * 上面的 core/__tests__/configuration.test.ts 用构造夹具证过一次；
+   * 这里在合成人群上再证一次 —— 从人群里真找出「某一项档位完全相同、
+   * 而该项所属组合落在不同分支」的两个人。找不到就说明这一层没起作用。
+   */
+  it('人群中存在：同一项档位相同，而所属组合读出不同的象', () => {
+    const spec = FACE_CONFIGURATIONS.find((c) => c.id === 'config.face.mingGongRoot')!
+    const probe = 'face.palace.mingGong'
+
+    // 按 probe 项的档位分组，看同组之内是否出现不同的象
+    const groups = new Map<string, Map<string, number>>()
+    FEATURE_SETS.forEach((fs, i) => {
+      const p = fs.find((f) => f.id === probe)
+      const d = results[i].detected.find((x) => x.id === spec.id)
+      if (!p || !d) return
+      if (!groups.has(p.band)) groups.set(p.band, new Map())
+      const m = groups.get(p.band)!
+      m.set(d.configuration, (m.get(d.configuration) ?? 0) + 1)
+    })
+
+    const split = [...groups].filter(([, m]) => m.size > 1)
+    say('\n===== 同一档位读出不同象（印堂 → 印堂与山根）=====')
+    for (const [band, m] of groups) {
+      say(`  印堂 ${band}：` + [...m].map(([k, v]) => `${k} ${v} 人`).join('　'))
+    }
+    expect(
+      split.length,
+      '没有任何一个档位读出过不同的象 —— 组合层没有起到作用，等于又回到「一条特征一句话」',
+    ).toBeGreaterThan(0)
+  })
+
+  it('组合段进 prompt 时不含任何 face3d 原始数值', () => {
+    for (const r of results.slice(0, 20)) {
+      expect(configurationBlock(r)).not.toContain('face3d.')
+    }
   })
 })
 

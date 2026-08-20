@@ -127,6 +127,22 @@ export interface Subject {
   focusTopics?: string[]
 }
 
+/**
+ * 组合成象（schema 2.1 新增，**可选**）。
+ *
+ * 与 features 并列而非替代：features 是「这一处是什么」，
+ * configurations 是「这几处凑在一起成了什么象」。
+ * 可选是为了让 IndexedDB 里 2.0/1.0 的旧记录照常读出来 —— 与 3D 那批字段同一个规矩。
+ *
+ * ⚠️ 组合**不参与星级**。它建立在 face3d.* 之上，而那批阈值从未用真实人群校准过，
+ * 不该拿去支撑一个用户会当成度量的数字。详见 core/configuration.ts。
+ */
+export interface ConfigurationEnvelope {
+  detected: import('./configuration').DetectedConfiguration[]
+  unmet: import('./configuration').UnmetConfiguration[]
+  contradictions: import('./configuration').Contradiction[]
+}
+
 export interface Raw {
   normalizer?: { type: 'IOD' | 'PW' | 'SW' | 'world'; valuePx: number }
   metrics?: Record<string, number | string | object | null>
@@ -174,6 +190,11 @@ export interface AnalysisEnvelope {
   unavailable: UnavailableItem[]
   scorecard: Scorecard
   policy: Policy
+  /**
+   * 组合成象。可选 —— 旧记录没有这个字段，读出来照常渲染。
+   * 不影响 scorecard：星级只由二维规则算。
+   */
+  configurations?: ConfigurationEnvelope
 }
 
 /* ============================================================
