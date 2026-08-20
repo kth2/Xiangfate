@@ -43,11 +43,46 @@ import {
   type Scorecard,
 } from './types'
 
-/** 特征 id 前缀 → 各维度权重。同一条特征可以贡献多个维度 */
+/**
+ * 特征 id 前缀 → 各维度权重。同一条特征可以贡献多个维度。
+ *
+ * ── 定权重的依据（2026-08 清过一遍）─────────────────────────
+ * 每条权重都对得上**规则层自己写的 meaning 文本**，不是另起一套心理学量表。
+ * 例如 `face.threeCourts.middle` 挂执行意志，因为规则层给它的释义就是
+ * 「中年主运，意志与执行力居优」；`bone.boneFlesh` 挂人际情感，因为
+ * 「骨露少肉，主性情孤峭、待人少回旋，六亲亦疏」。
+ * 这样星级的来由与报告里的话必然一致 —— 用户点开某一维看到的理由，
+ * 就是他在正文里读到的那句。
+ *
+ * 清过一遍才发现两类问题：
+ *   · **11 条特征一个维度都没挂** —— 法令纹、男女宫、婚姻线、土星丘、太阳丘、
+ *     火星丘、眉骨、骨盆、太阳穴、臂展。测得出来、写进报告，却到不了星级。
+ *   · **骨相的「人际情感」合计权重为 0** —— 于是每份骨相报告这一维都恒定
+ *     停在中性并标「未测到」，而规则层明明写着「待人少回旋」「好压人一头」
+ *     「不喜冲突，相处轻松」。
+ *
+ * `src/core/__tests__/weights.test.ts` 直接从 rules 源码抽 id 做覆盖审计，
+ * 新增特征忘了挂权重会直接红。
+ * ────────────────────────────────────────────────────────
+ */
 type WeightMap = Record<string, Partial<Record<ScoreDimension, number>>>
 
 const FACE_WEIGHTS: WeightMap = {
+  /**
+   * 三停按停分列 —— 不能笼统挂一个 `face.threeCourts`。
+   * 三停各主一段，规则层给的释义就写明了各自所主：
+   *   上停「早年得势，偏思虑型」· 中停「中年主运，**意志与执行力居优**」
+   *   下停「晚运厚实，重根基与长期积累」
+   * 笼统一条会把「中停丰隆」的执行力信号算到气度格局上去。
+   * ⚠️ weightsFor 取最长前缀匹配，因此这里的每条特定项都要把该 id 的权重写全，
+   *    写漏的维度不会从 'face.threeCourts' 那条继承。
+   */
   'face.threeCourts': { 气度格局: 3, 根基福泽: 1 },
+  'face.threeCourts.middle': { 气度格局: 2, 执行意志: 2 },
+  'face.threeCourts.middleWeak': { 气度格局: 2, 执行意志: 2 },
+  'face.threeCourts.lower': { 气度格局: 1, 根基福泽: 3, 执行意志: 1 },
+  'face.threeCourts.lowerWeak': { 气度格局: 1, 根基福泽: 3, 执行意志: 1 },
+
   'face.fiveEye': { 气度格局: 2 },
   'face.innerGap': { 气度格局: 1, 才智思辨: 1 },
   'face.symmetry': { 气度格局: 2 },
@@ -60,7 +95,12 @@ const FACE_WEIGHTS: WeightMap = {
   'face.eye.shape': { 才智思辨: 1, 人际情感: 1 },
   'face.eye.openness': { 才智思辨: 3 },
   'face.eye.sclera': { 执行意志: 1 },
-  'face.nose.bridge': { 执行意志: 3 },
+  /**
+   * face.nose.bridge 曾在这里挂「执行意志: 3」，是该维最重的一条。
+   * 它已列入 core/evidenceOnly（判线离实测量级 11–52 倍），不再参与打分 ——
+   * 于是执行意志一度只剩 face.nose.root 一条在撑（纯面相且无像素输入时）。
+   * 不把权重挪回一条站不住的判线上，改为补齐真正测得到的那几项。
+   */
   'face.nose.root': { 执行意志: 2, 才智思辨: 1 },
   'face.nose.alar': { 根基福泽: 2 },
   'face.mouth.width': { 人际情感: 2 },
@@ -70,7 +110,19 @@ const FACE_WEIGHTS: WeightMap = {
   'face.palace.mingGong': { 才智思辨: 2, 气度格局: 1 },
   'face.palace.caibo': { 根基福泽: 3 },
   'face.palace.tianzhai': { 人际情感: 1, 根基福泽: 2 },
+  /** 男女宫（卧蚕/泪堂）：「精神足、异性缘厚」/「心力多耗，情感上易劳神」 */
+  'face.palace.nannv': { 人际情感: 2, 根基福泽: 1 },
+  /** 法令：「威权已立、令行禁止，中晚年主事之相」/「威令未立…做事易被人越过」 */
+  'face.nasolabial': { 执行意志: 2, 气度格局: 1 },
   'face.complexion': { 根基福泽: 1, 气度格局: 1 },
+  /**
+   * face.mole 刻意不给权重。
+   *
+   * 痣的相理是**按位置**分的（印堂见痣与颧见痣主的不是一件事），而这一项把
+   * 所有位置压成一个 categorical 特征，标签是动态拼的。给它挂任何一个维度
+   * 都是把「哪个位置」的信息丢掉之后瞎凑。它照旧进报告、进断语（走前缀匹配），
+   * 只是不进星级。要让它参与打分，得先按位置拆成独立特征。
+   */
 }
 
 const HAND_WEIGHTS: WeightMap = {
@@ -80,6 +132,8 @@ const HAND_WEIGHTS: WeightMap = {
   'hand.line.heart': { 人际情感: 3 },
   'hand.line.fate': { 执行意志: 3, 气度格局: 1 },
   'hand.line.sun': { 气度格局: 1 },
+  /** 婚姻线 —— 只主情缘亲疏 */
+  'hand.line.marriage': { 人际情感: 2 },
   'hand.finger.thumb': { 执行意志: 2 },
   'hand.finger.index': { 气度格局: 1, 执行意志: 1 },
   'hand.finger.little': { 人际情感: 2 },
@@ -87,17 +141,36 @@ const HAND_WEIGHTS: WeightMap = {
   'hand.mount.venus': { 根基福泽: 2 },
   'hand.mount.mercury': { 人际情感: 1 },
   'hand.mount.moon': { 才智思辨: 1 },
+  /** 土星丘：「稳重踏实，责任感强」/「偏重当下，无长远之谋」—— 稳重归根基，谋远归才智 */
+  'hand.mount.saturn': { 执行意志: 2, 才智思辨: 1, 根基福泽: 1 },
+  /** 太阳丘：「有艺术气质，乐观开朗」/ 过盛「好名浮夸」 */
+  'hand.mount.apollo': { 气度格局: 1, 人际情感: 1 },
+  /** 火星丘：「勇气十足，行动力强」/「遇事先观望而少决断」/ 过盛「争强好斗」 */
+  'hand.mount.mars': { 执行意志: 2, 人际情感: 1 },
 }
 
+/**
+ * 骨相的「人际情感」原来合计权重为 **0** —— 于是每一份骨相报告的这一维
+ * 都恒定落在中性 3 星并标 neutralFallback，等于告诉用户「这一项我们测不了」。
+ * 而规则层自己写的释义里明明有：骨露少肉「性情孤峭、待人少回旋，六亲亦疏」、
+ * 权骨隆起「过显则好压人一头」、眉骨柔和「不喜冲突，相处轻松」。
+ * 信号一直在，只是没接上。
+ */
 const BONE_WEIGHTS: WeightMap = {
   'bone.headShape': { 气度格局: 2, 才智思辨: 1 },
-  'bone.zygomatic': { 执行意志: 2, 气度格局: 1 },
+  'bone.zygomatic': { 执行意志: 2, 气度格局: 1, 人际情感: 1 },
   'bone.frontal': { 才智思辨: 3 },
   'bone.mandible': { 执行意志: 3 },
-  'bone.boneFlesh': { 气度格局: 3, 根基福泽: 1 },
+  'bone.boneFlesh': { 气度格局: 3, 根基福泽: 1, 人际情感: 2 },
   'bone.thickness': { 执行意志: 1, 根基福泽: 1 },
   'bone.shoulder': { 气度格局: 2 },
   'bone.spine': { 气度格局: 1, 执行意志: 1 },
+  /** 眉骨：「性格有力度，对事情有掌控意愿」/「性情温和，不喜冲突，相处轻松」 */
+  'bone.brow': { 执行意志: 2, 人际情感: 1 },
+  /** 太阳穴（颞部）：「胆识过人，敢于尝试新路」/「进取有度，稳中求变」 */
+  'bone.temporal': { 执行意志: 2, 才智思辨: 1 },
+  /** 骨盆：「包容力强，根基稳」/「身形利落，行动轻捷」 */
+  'bone.pelvis': { 根基福泽: 2, 执行意志: 1 },
 }
 
 const BODY_WEIGHTS: WeightMap = {
@@ -112,6 +185,8 @@ const BODY_WEIGHTS: WeightMap = {
   'body.survey.voice': { 人际情感: 2 },
   'body.survey.pace': { 人际情感: 1 },
   'body.survey.dress': { 人际情感: 1, 气度格局: 1 },
+  /** 臂展：「比例协调，传统视为平衡发展之相」/「肢体比例自有特点」 */
+  'body.proportion.armReach': { 气度格局: 1 },
 }
 
 const WEIGHTS: WeightMap = {
@@ -120,6 +195,15 @@ const WEIGHTS: WeightMap = {
   ...BONE_WEIGHTS,
   ...BODY_WEIGHTS,
 }
+
+/**
+ * 仅供 __tests__/weights.test.ts 的覆盖审计使用。
+ * 不是公开 API —— 星级一律走 computeScorecard / explainScorecard。
+ */
+export const weightsForTest = (id: string) => weightsFor(id)
+
+/** 权重表的全部键，供覆盖审计查死键。同样只给测试用 */
+export const WEIGHT_KEYS = Object.keys(WEIGHTS)
 
 /** 找到最长匹配的前缀，允许 rules 里加子级 id 而不必改这张表 */
 function weightsFor(id: string): Partial<Record<ScoreDimension, number>> | undefined {

@@ -342,9 +342,9 @@ describe('星级多样性', () => {
 
   it('五维组合的种类数不至于寥寥可数', () => {
     // 用户眼前看到的就是这张星级卡。理论上限 5^5 = 3125。
-    // 三个阶段：起初 19 种（旧映射，balanced 恒落 4.25 星）→
-    // 阈值收窄后 34 种 → 星级映射重写后 110 种。钉住现状，只许上升。
-    expect(stats.distinctCards).toBeGreaterThanOrEqual(105)
+    // 四个阶段：起初 19 种（旧映射，balanced 恒落 4.25 星）→ 阈值收窄后 34 →
+    // 星级映射重写后 110 → 补齐权重表后 120。钉住现状，只许上升。
+    expect(stats.distinctCards).toBeGreaterThanOrEqual(118)
   })
 
   it('五档星数都有人拿到 —— 旧映射下 1 星与 2 星从无人拿到', () => {
@@ -356,12 +356,13 @@ describe('星级多样性', () => {
     expect([...seen].sort()).toEqual([1, 2, 3, 4, 5])
   })
 
-  it('没有哪一维把七成以上的人压在同一星数上', () => {
-    // 「执行意志」是目前最集中的一维（70%），来由不是映射而是权重表偏薄：
+  it('没有哪一维把过半的人压在同一星数上', () => {
+    // 曾经的最集中项是「执行意志」70%，来由是权重表偏薄：
     // face.nose.bridge 转为只报数后，纯面相且无像素输入时它几乎只剩
-    // face.nose.root 一条在撑。补权重表是另一件事，先钉住不许更差。
+    // face.nose.root 一条在撑。补齐权重表后该维从 10 条特征取值（7 条非像素），
+    // 最集中降到 50%。覆盖审计见 core/__tests__/weights.test.ts。
     for (const dim of SCORE_DIMENSIONS) {
-      expect(stats.topShare[dim]).toBeLessThanOrEqual(0.7)
+      expect(stats.topShare[dim], `${dim} 过于集中`).toBeLessThanOrEqual(0.55)
     }
   })
 })
