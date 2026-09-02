@@ -6,7 +6,7 @@
  *   ② 取绿通道（皮肤褶皱在绿通道对比度最好）
  *   ③ CLAHE 局部对比增强
  *   ④ Gabor 滤波器组，8 方向取最大响应（掌纹是暗谷，已取负）
- *   ⑤ 自适应阈值二值化
+ *   ⑤ 自适应阈值二值化（阈值系数见下方 THRESHOLD_K）
  *   ⑥ 闭运算桥接断口 + 移除小连通域
  *   ⑦ Zhang-Suen 细化成 1px 骨架
  *   ⑧ 追踪成折线 + 合并共线段
@@ -23,6 +23,8 @@ import {
   DEFAULT_GABOR,
 } from '@/cv/index'
 import { mergeCollinear, traceSkeleton, type Polyline } from '@/cv/trace'
+import { PALMLINE_THRESHOLD_K } from './palmline.threshold'
+
 
 export interface PalmLineRequest {
   id: number
@@ -54,7 +56,7 @@ self.onmessage = (e: MessageEvent<PalmLineRequest>) => {
     const equalized = clahe(gray, 8, 2.0)
     const response = gaborMaxResponse(equalized, DEFAULT_GABOR)
 
-    const bin = adaptiveThreshold(response, 15, 0.35)
+    const bin = adaptiveThreshold(response, 15, PALMLINE_THRESHOLD_K)
     const closed = close(bin, image.width, image.height, 1)
     const cleaned = removeSmallComponents(closed, image.width, image.height, 40)
     const skeleton = thin(cleaned, image.width, image.height)
