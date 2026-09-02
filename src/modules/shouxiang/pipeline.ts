@@ -120,7 +120,7 @@ export function buildShouxiangEnvelope(
     primaryShot.bitmap.width,
     primaryShot.bitmap.height,
   )
-  const mounts = computeMounts(primary.normalized)
+  const { mounts } = computeMounts(primary.normalized)
 
   const handsCaptured = [...new Set(analyses.map((a) => a.side))]
   const otherIdx = analyses.findIndex((_, i) => i !== primaryIdx)

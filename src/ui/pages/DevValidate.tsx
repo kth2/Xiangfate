@@ -25,8 +25,20 @@ import {
   type ExportBundle,
   type LandmarkSample,
 } from '@/dev/validate'
+import {
+  formatPalmReport,
+  PALM_EXPORT_VERSION,
+  type PalmBundle,
+  type PalmSample,
+} from '@/dev/palm-validate'
+import { analyzePalm } from '@/modules/shouxiang/pipeline'
+import { computeMounts } from '@/modules/shouxiang/mounts'
 
 /** 文件名形如 `张三_01.jpg` / `张三-正面-2.jpg` 时，下划线或短横前的部分视作同一个人 */
+/* 手相定标：与人脸走两条独立的收集线，报告也各出一份 */
+const HAND_SIDE = (name: string): 'left' | 'right' =>
+  /left|左/i.test(name) ? 'left' : 'right'
+
 function subjectOf(fileName: string): string {
   const base = fileName.replace(/\.[^.]+$/, '')
   const m = base.split(/[_\-\s]/)[0]
@@ -35,10 +47,12 @@ function subjectOf(fileName: string): string {
 
 export function DevValidate() {
   const [samples, setSamples] = useState<LandmarkSample[]>([])
+  const [palms, setPalms] = useState<PalmSample[]>([])
   const [busy, setBusy] = useState(false)
   const [log, setLog] = useState<string[]>([])
   const [report, setReport] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const palmRef = useRef<HTMLInputElement>(null)
 
   const say = (s: string) => setLog((l) => [...l, s])
 
@@ -75,6 +89,88 @@ export function DevValidate() {
 
     setSamples((s) => [...s, ...next])
     setBusy(false)
+  }
+
+  /**
+   * 手掌那条线。
+   *
+   * 跑的是与生产完全相同的路径（detect → analyzePalm → computeMounts），
+   * 所以导出的数字就是线上会拿到的数字 —— 定标才有意义。
+   * 同样一个像素都不导出。
+   */
+  async function onPalmFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = [...(e.target.files ?? [])]
+    e.target.value = ''
+    if (!files.length) return
+
+    setBusy(true)
+    setReport(null)
+    const next: PalmSample[] = []
+
+    for (const f of files) {
+      try {
+        const img = await loadImageFile(f)
+        const res = await detect('hand', img.bitmap)
+        const side = HAND_SIDE(f.name)
+        const analysis = await analyzePalm({ detection: res, bitmap: img.bitmap, side })
+        const { mounts, palmMedianLuma } = computeMounts(analysis.normalized)
+
+        const lines: PalmSample['lines'] = {}
+        for (const [name, m] of analysis.lines) {
+          // 折线本身可反推掌形，不导出；只留度量
+          const { points: _drop, name: _n, ...rest } = m
+          lines[name] = rest
+        }
+
+        next.push({
+          subjectId: subjectOf(f.name),
+          label: f.name,
+          side,
+          handedness: res.handedness?.label ?? (side === 'left' ? 'Left' : 'Right'),
+          landmarks: res.landmarks.map((p) => ({ x: p.x, y: p.y, z: p.z ?? 0 })),
+          imgWidth: img.width,
+          imgHeight: img.height,
+          detectorScore: res.detectorScore,
+          lines,
+          mounts: Object.fromEntries(
+            Object.entries(mounts).map(([k, v]) => [
+              k,
+              {
+                sampleCount: v.sampleCount,
+                medianLuma: v.medianLuma,
+                fullness: v.fullness,
+                band: v.band,
+              },
+            ]),
+          ),
+          palmMedianLuma,
+        })
+        say(`✓ ${f.name} —— 归类出 ${Object.keys(lines).length} 条主线`)
+        img.bitmap.close()
+        URL.revokeObjectURL(img.previewUrl)
+      } catch (err) {
+        say(`✗ ${f.name} —— ${err instanceof Error ? err.message : '检测失败'}`)
+      }
+    }
+
+    setPalms((s) => [...s, ...next])
+    setBusy(false)
+  }
+
+  function palmBundle(): PalmBundle {
+    return {
+      version: PALM_EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      samples: palms,
+    }
+  }
+
+  function runPalm() {
+    try {
+      setReport(formatPalmReport(palmBundle()))
+    } catch (err) {
+      say(`✗ 生成手相报告失败：${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   function bundle(): ExportBundle {
@@ -164,6 +260,70 @@ export function DevValidate() {
             onClick={() => {
               setSamples([])
               setLog([])
+              setReport(null)
+            }}
+            className="btn-outline h-11 px-4 text-[14px] disabled:opacity-40"
+          >
+            清空
+          </button>
+        </div>
+      </div>
+
+      <div className="rule-gold my-6" />
+
+      {/* ---- 手相定标：与人脸分开，两批样本互不相干 ---- */}
+      <div className="flex flex-col gap-3">
+        <div>
+          <h2 className="font-title text-sm tracking-[0.2em]">手相定标</h2>
+          <p className="mt-1 text-[12px] leading-relaxed text-muted">
+            收手掌照，导出三件目前只能靠猜的东西：归一化的病态程度、掌纹响应的分布、
+            掌丘取样圆压在什么上。文件名含 left / 左 者按左手处理。
+          </p>
+        </div>
+
+        <input
+          ref={palmRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={onPalmFiles}
+          className="hidden"
+        />
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => palmRef.current?.click()}
+          className="btn-outline h-12 text-[15px] disabled:opacity-40"
+        >
+          {busy ? '检测中…' : '选手掌照（可多选）'}
+        </button>
+
+        <p className="text-[12px] text-muted">
+          已收 {palms.length} 只手，来自 {new Set(palms.map((p) => p.subjectId)).size} 位
+        </p>
+
+        <div className="flex gap-3">
+          <button
+            type="button"
+            disabled={!palms.length}
+            onClick={runPalm}
+            className="btn-outline h-11 flex-1 text-[14px] disabled:opacity-40"
+          >
+            出定标报告
+          </button>
+          <button
+            type="button"
+            disabled={!palms.length}
+            onClick={() => download('palm-calibration.json', JSON.stringify(palmBundle()))}
+            className="btn-outline h-11 flex-1 text-[14px] disabled:opacity-40"
+          >
+            导出手掌数据
+          </button>
+          <button
+            type="button"
+            disabled={!palms.length}
+            onClick={() => {
+              setPalms([])
               setReport(null)
             }}
             className="btn-outline h-11 px-4 text-[14px] disabled:opacity-40"

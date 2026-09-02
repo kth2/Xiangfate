@@ -10,9 +10,31 @@ import { dist, sagittaRatio, signedSagittaRatio, type P2 } from '@/core/geom'
 import type { Polyline } from '@/cv/trace'
 import type { PalmLineName } from '@/core/types'
 import { CANVAS } from './landmarks'
+import { T } from './thresholds'
 
 /** 低于此分数视为没测到 */
 export const MATCH_THRESHOLD = 0.45
+
+/**
+ * 响应下限：沿线的平均响应低于此值，就当作没找到这条线。
+ *
+ * ── 为什么必须有这一道 ──────────────────────────────────
+ * MATCH_THRESHOLD 打的是**位置像不像**，跟「到底有没有找到东西」是两回事。
+ * 于是一段落在大致正确区域里的噪声碎纹也能被提名为生命线 ——
+ * 实测过一次：一张手掌照上四条主线全部命中，而沿线响应只有 0.14，
+ * 报告照样写出「生命线浅短 · 精力有起伏，宜规律作息」。
+ * 那句话背后什么都没有。位置分再高也不能替代信号本身。
+ *
+ * ── 这个数从哪来 ────────────────────────────────────────
+ * 取 T.line.shallow 的一半。相书能命名的最淡一档是「浅」，其区间为 (0, 0.35)；
+ * 判线设在它的中点，即「浅的下半段不算浅，算没找到」。
+ * 锚在既有判线上，不是另拍一个数。
+ *
+ * ⚠️ CALIBRATE：中点这个选择是暂定的。真实掌纹的响应分布到手之后应按分位重设 ——
+ * dev/validate.ts 导出的 palm.lines[].depth 正是为此准备的。
+ * 现在只知道 0.14 那种碎纹必须挡住，不知道真实的淡纹落在哪。
+ */
+export const SIGNAL_FLOOR = T.line.shallow / 2
 
 interface Zone {
   x: [number, number]
@@ -77,8 +99,15 @@ const PRIORS: Record<PalmLineName, LinePrior> = {
     curveSign: 0,
     length: [0.15, 0.7],
   },
+  /**
+   * ⚠️ 起点区原为 x [0.85, 1.0] —— **整块落在掌外**。
+   * 画布锚点把小指 MCP 钉在 x = 0.75，手掌不会从自己的指根线再向尺侧
+   * 探出 0.1 个画布宽，所以那个区间里只可能有背景噪声。
+   * 现改为跨在被锚定的尺侧指根（0.75）两侧。
+   * ⚠️ CALIBRATE：0.70–0.85 这个跨度取自锚点，不是量出来的掌缘。
+   */
   婚姻线: {
-    start: { x: [0.85, 1.0], y: [0.12, 0.35] },
+    start: { x: [0.7, 0.85], y: [0.12, 0.35] },
     end: { x: [0.6, 0.95], y: [0.12, 0.35] },
     orientation: 0,
     orientationTol: 30,
@@ -137,9 +166,14 @@ export function classifyLines(
 
     if (!best || best.score < MATCH_THRESHOLD) continue
 
-    used.add(best.line)
     const pts = best.flipped ? [...best.line.points].reverse() : best.line.points
-    out.set(name, measure(name, best.line, pts, best.score, response, lines))
+    const m = measure(name, best.line, pts, best.score, response, lines)
+
+    // 响应太弱：位置对不算测到。不消耗这条候选 —— 它本来就不是纹
+    if (m.depth < SIGNAL_FLOOR) continue
+
+    used.add(best.line)
+    out.set(name, m)
   }
 
   return out

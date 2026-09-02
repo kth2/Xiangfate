@@ -38,7 +38,7 @@ import { T } from './thresholds'
 export interface HandRuleInput {
   m: HandMetrics
   lines: Map<PalmLineName, LineMeasure>
-  mounts: Record<MountKey, { fullness: number; band: Exclude<MountBand, 'unavailable'> }>
+  mounts: Record<MountKey, { fullness: number; band: MountBand }>
   qualityFactor: number
   detectorScore: number
   handedness: 'Left' | 'Right'
@@ -151,6 +151,17 @@ export function applyHandRules(input: HandRuleInput): HandRuleOutput {
   /* ============ 掌丘 ============ */
   for (const key of Object.keys(mounts) as MountKey[]) {
     const mt = mounts[key]
+    /**
+     * 采样圆越过掌缘、或落在圆内的手部像素不足 —— 量到的有一部分不是手，
+     * 亮度代理分不出皮肤与背景。这种情况如实标为不可用，不给饱满度。
+     */
+    if (mt.band === 'unavailable') {
+      unavailable.push({
+        id: mountFeatureId(key), label: key, reason: 'low_confidence',
+        detail: `${key}的取样范围越出掌缘，圈内混有非手部像素，本次不作论断`,
+      })
+      continue
+    }
     const meaning = MOUNT_MEANING[key]
     const text =
       mt.band === 'very_high' ? meaning.excess : mt.band === 'high' ? meaning.high :
