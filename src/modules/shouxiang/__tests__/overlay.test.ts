@@ -7,8 +7,10 @@
 
 import { describe, expect, it } from 'vitest'
 import type { MountBand, MountName, PalmLineName } from '@/core/types'
-import { buildPalmMarks } from '../overlay'
-import { CANVAS, MOUNTS } from '../landmarks'
+import { buildPalmMarks, marksToSourceSpace, type PalmMark } from '../overlay'
+import { CANVAS, CANVAS_ANCHORS, MOUNTS } from '../landmarks'
+import { applyHomography, findHomography } from '@/cv/homography'
+import type { P2 } from '@/core/geom'
 import type { LineMeasure } from '../palmlines'
 import { applyHandRules, type HandRuleInput } from '../rules'
 
@@ -204,5 +206,93 @@ describe('标号与断语对得上', () => {
       expect(items[0].label.length).toBeGreaterThan(1)
       expect(items[0].meaning.length).toBeGreaterThan(4)
     }
+  })
+})
+
+/* ============================================================
+   映回原照片
+   ============================================================ */
+
+describe('映回原照片', () => {
+  /** 一只手的四个锚点在原照片像素里的位置，与 normalizePalm 取的是同一组 */
+  const SRC = [
+    { x: 380, y: 500 }, // 食指 MCP
+    { x: 710, y: 550 }, // 小指 MCP
+    { x: 500, y: 920 }, // 腕
+    { x: 500, y: 470 }, // 中指 MCP
+  ]
+  const DST = [
+    CANVAS_ANCHORS.indexMcp,
+    CANVAS_ANCHORS.pinkyMcp,
+    CANVAS_ANCHORS.wrist,
+    CANVAS_ANCHORS.middleMcp,
+  ]
+  const H = findHomography(SRC, DST)
+  const frame = { H, mirrored: false, srcWidth: 1000, srcHeight: 1000, scale: 1 }
+
+  const markAt = (p: P2): PalmMark => ({
+    n: 1,
+    name: '生命线',
+    kind: 'line',
+    featureId: 'hand.line.life',
+    anchor: p,
+    path: [p, p],
+  })
+
+  it('逆变换是严格的：画布上的点映回去，正落回它当初来的那个像素', () => {
+    for (const src of SRC) {
+      const onCanvas = applyHomography(H, src)
+      const [back] = marksToSourceSpace([markAt(onCanvas)], frame)
+      expect(back.anchor!.x).toBeCloseTo(src.x, 3)
+      expect(back.anchor!.y).toBeCloseTo(src.y, 3)
+    }
+  })
+
+  it('整条描线一起映回去，不只是徽标那一个点', () => {
+    const a = applyHomography(H, SRC[0])
+    const b = applyHomography(H, SRC[2])
+    const m: PalmMark = { ...markAt(a), path: [a, b] }
+    const [back] = marksToSourceSpace([m], frame)
+    expect(back.path![0].x).toBeCloseTo(SRC[0].x, 3)
+    expect(back.path![1].y).toBeCloseTo(SRC[2].y, 3)
+  })
+
+  it('左手要把那次水平镜像也撤掉', () => {
+    const src = { x: 380, y: 500 }
+    const onCanvas = applyHomography(H, src)
+    const [back] = marksToSourceSpace([markAt(onCanvas)], { ...frame, mirrored: true })
+    // 镜像帧里的 x 应被翻回 srcWidth − 1 − x
+    expect(back.anchor!.x).toBeCloseTo(1000 - 1 - src.x, 3)
+    expect(back.anchor!.y).toBeCloseTo(src.y, 3)
+  })
+
+  it('缩略图的缩放比一并作用到坐标上', () => {
+    const src = { x: 380, y: 500 }
+    const onCanvas = applyHomography(H, src)
+    const [back] = marksToSourceSpace([markAt(onCanvas)], { ...frame, scale: 0.5 })
+    expect(back.anchor!.x).toBeCloseTo(src.x * 0.5, 3)
+    expect(back.anchor!.y).toBeCloseTo(src.y * 0.5, 3)
+  })
+
+  it('映出画面的标号不落 —— 宁可不标，也不指到照片外面去', () => {
+    // 画布左上角之外的一点，逆变换后大概率落在原照片之外
+    const far = { x: -4000, y: -4000 }
+    const [back] = marksToSourceSpace([markAt(far)], frame)
+    expect(back.anchor).toBeNull()
+  })
+
+  it('未测到的线映回去仍然是未测到', () => {
+    const m: PalmMark = { n: 5, name: '太阳线', kind: 'line', featureId: 'hand.line.sun', anchor: null }
+    const [back] = marksToSourceSpace([m], frame)
+    expect(back.anchor).toBeNull()
+    expect(back.path).toBeUndefined()
+  })
+
+  it('序号、名称、featureId 一律不变 —— 这一步只动坐标', () => {
+    const marks = buildPalmMarks(FOUR_LINES, { ...ALL_BALANCED, 金星丘: 'high' })
+    const back = marksToSourceSpace(marks, frame)
+    expect(back.map((m) => m.n)).toEqual(marks.map((m) => m.n))
+    expect(back.map((m) => m.name)).toEqual(marks.map((m) => m.name))
+    expect(back.map((m) => m.featureId)).toEqual(marks.map((m) => m.featureId))
   })
 })

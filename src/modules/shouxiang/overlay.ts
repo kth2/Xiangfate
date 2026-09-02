@@ -9,6 +9,7 @@
  */
 
 import type { P2 } from '@/core/geom'
+import { applyHomography, invertHomography, type Matrix3 } from '@/cv/homography'
 import type { MountBand, MountName, PalmLineName } from '@/core/types'
 import { CANVAS, MOUNTS, type MountKey } from './landmarks'
 import type { LineMeasure } from './palmlines'
@@ -108,4 +109,65 @@ function pickAnchor(points: P2[], placed: P2[]): P2 {
     if (clearance >= MIN_GAP) break // 够开了就不必再挑
   }
   return best
+}
+
+/* ============================================================
+   映回原照片
+   ============================================================ */
+
+export interface SourceFrame {
+  /** 原图 → 标准画布 的单应矩阵（analyzePalm 给出） */
+  H: Matrix3
+  /** 左手在归一化之前做过水平镜像 */
+  mirrored: boolean
+  /** 原照片像素尺寸 */
+  srcWidth: number
+  srcHeight: number
+  /** 展示用图相对原照片的缩放比（把大图缩小了就传这个） */
+  scale: number
+}
+
+/**
+ * 把标准画布坐标的标号映回**原照片**坐标。
+ *
+ * ── 为什么要映回去 ─────────────────────────────────────
+ * 报告页原先直接展示标准掌图。但那张图是单应变换的产物，而这个变换目前是坏的：
+ * 实测任何手形下都有 4 个以上关节点被甩出画布，掌根一侧甚至被投到 x = −0.955。
+ * 于是用户看到的是一张歪斜、带背景楔形、手掌没框住的图 —— 图没画错，
+ * 是它照实画了一个本来就不对的画布。
+ *
+ * 度量帧不能动（所有掌线先验与丘位都定在它上面，改帧要连带重定标）。
+ * 但**给人看的图**没有理由跟度量帧绑在一起。于是把描线用 H⁻¹ 映回原照片，
+ * 画在原照片上：
+ *   · 描线会精确落回它当初被找到的那些像素 —— 逆变换是严格的，歪不歪都对得上
+ *   · 用户看到的是自己那张正常的手掌照，框得住、认得出
+ *   · 归一化坏在哪里也就藏不住了，反而更容易看出来
+ *
+ * 掌丘中心是定义在画布上的比例点，映回去有可能落到手外；那种情况不落标号
+ * （返回 anchor = null），宁可不标也不指错地方。
+ */
+export function marksToSourceSpace(marks: PalmMark[], frame: SourceFrame): PalmMark[] {
+  const Hinv = invertHomography(frame.H)
+
+  const back = (p: P2): P2 => {
+    const q = applyHomography(Hinv, p)
+    // 撤掉左手那一次水平镜像，再按展示尺寸缩放
+    const x = frame.mirrored ? frame.srcWidth - 1 - q.x : q.x
+    return { x: x * frame.scale, y: q.y * frame.scale }
+  }
+
+  const W = frame.srcWidth * frame.scale
+  const Hh = frame.srcHeight * frame.scale
+  const inside = (p: P2): boolean => p.x >= 0 && p.x <= W && p.y >= 0 && p.y <= Hh
+
+  return marks.map((m) => {
+    const path = m.path?.map(back)
+    const anchor = m.anchor ? back(m.anchor) : null
+    return {
+      ...m,
+      // 映出画面的标号不落 —— 那说明归一化把这一处推到了照片之外
+      anchor: anchor && inside(anchor) ? anchor : null,
+      ...(path ? { path } : {}),
+    }
+  })
 }

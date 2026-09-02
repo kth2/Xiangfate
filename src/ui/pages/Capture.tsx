@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { getTypeSpec, isAnalysisType, type ShotSpec } from '@/core/registry'
-import { captureVideoBurst, loadImageFile } from '@/core/image'
+import { captureVideoBurst, loadImageFile, scaleToImageData } from '@/core/image'
 import {
   cameraErrorMessage,
   cameraUnavailableReason,
@@ -29,7 +29,7 @@ import {
 } from '@/modules/shouxiang/pipeline'
 import type { SurveyAnswers } from '@/modules/tixiang/survey'
 import type { P2 } from '@/core/geom'
-import { buildPalmMarks } from '@/modules/shouxiang/overlay'
+import { buildPalmMarks, marksToSourceSpace } from '@/modules/shouxiang/overlay'
 import type {
   AnalysisEnvelope,
   PalmLineName,
@@ -66,6 +66,9 @@ interface Captured {
  * 但足以把关键点抖动和一瞬间的表情平掉。再多则边际收益递减、等待变明显。
  */
 const BURST_FRAMES = 5
+
+/** 报告页标注图的长边上限。够看清掌纹，又不至于让 ImageData 常驻几十 MB */
+const OVERLAY_MAX_SIDE = 900
 
 export function Capture() {
   const { type } = useParams()
@@ -413,15 +416,33 @@ export function Capture() {
           )
 
           /**
-           * 报告页的掌图标注。走 resolvePalmLines 而不是直接用 primary.lines ——
-           * 用户校正过的线必须是图上画的那条，否则图与文会对不上。
+           * 报告页的掌图标注。两处讲究：
+           *
+           * 1. 走 resolvePalmLines 而不是直接用 primary.lines ——
+           *    用户校正过的线必须是图上画的那条，否则图与文会对不上。
+           * 2. 画在**原照片**上，描线用 H⁻¹ 映回去，而不是展示标准掌图。
+           *    标准掌图是那个坏掉的单应变换的产物：任何手形下都有关节点被甩出
+           *    画布，于是用户看到一张歪斜、带背景楔形、手掌没框住的图。
+           *    逆变换是严格的，所以描线会精确落回它当初被找到的像素上。
+           *
            * 只放进内存 store，不落库：照片本来就不保存。
            */
+          const shownFor = handShots[0]
+          const { image: shown, scale } = scaleToImageData(shownFor.bitmap, OVERLAY_MAX_SIDE)
           setPalmOverlay({
-            image: primary.normalized,
-            marks: buildPalmMarks(
-              resolvePalmLines(primary, correctionsRef.current),
-              (env.derived as ShouxiangDerived).mountProfile,
+            image: shown,
+            marks: marksToSourceSpace(
+              buildPalmMarks(
+                resolvePalmLines(primary, correctionsRef.current),
+                (env.derived as ShouxiangDerived).mountProfile,
+              ),
+              {
+                H: primary.H,
+                mirrored: primary.mirrored,
+                srcWidth: primary.srcWidth,
+                srcHeight: primary.srcHeight,
+                scale,
+              },
             ),
           })
           break

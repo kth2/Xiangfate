@@ -17,6 +17,7 @@ import {
   type Subject,
 } from '@/core/types'
 import type { P2, P3 } from '@/core/geom'
+import type { Matrix3 } from '@/cv/homography'
 import type { DetectResult } from '@/mediapipe/detect'
 import { extractPalmLines } from '@/workers/palmline.client'
 import { computeHandMetrics } from './metrics'
@@ -47,6 +48,13 @@ export interface PalmAnalysis {
   lines: Map<PalmLineName, LineMeasure>
   /** 所有候选折线，校正界面里让用户点选 */
   candidates: { points: P2[]; length: number }[]
+  /** 原图 → 标准画布 的单应矩阵。报告页要用它的逆把描线映回原照片 */
+  H: Matrix3
+  /** 左手先做过水平镜像；映回原图时要把这一步也撤掉 */
+  mirrored: boolean
+  /** 原照片尺寸，映回时用来撤镜像 */
+  srcWidth: number
+  srcHeight: number
   response: Float32Array
   ms: number
 }
@@ -55,7 +63,7 @@ export interface PalmAnalysis {
 export async function analyzePalm(shot: HandShot): Promise<PalmAnalysis> {
   const src = toImageData(shot.bitmap)
   const handedness = shot.detection.handedness?.label ?? (shot.side === 'left' ? 'Left' : 'Right')
-  const { image } = normalizePalm(src, shot.detection.landmarks as P3[], handedness)
+  const { image, H, mirrored } = normalizePalm(src, shot.detection.landmarks as P3[], handedness)
 
   const { lines, response, ms } = await extractPalmLines(image)
   const classified = classifyLines(lines, response)
@@ -65,6 +73,10 @@ export async function analyzePalm(shot: HandShot): Promise<PalmAnalysis> {
     normalized: image,
     lines: classified,
     candidates: lines.map((l) => ({ points: l.points, length: l.length })),
+    H,
+    mirrored,
+    srcWidth: src.width,
+    srcHeight: src.height,
     response,
     ms,
   }

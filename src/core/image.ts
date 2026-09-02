@@ -132,6 +132,25 @@ async function canvasToObjectUrl(canvas: AnyCanvas): Promise<string> {
   return URL.createObjectURL(blob)
 }
 
+/**
+ * 把位图缩到长边不超过 maxSide，返回 ImageData 与实际缩放比。
+ *
+ * 报告页要在原照片上画标注，而手机直出的照片动辄 4000×3000 ——
+ * 那就是 48MB 的 ImageData 常驻内存。缩到长边 900 足够看清掌纹，
+ * 内存降到 3MB 上下。返回的 scale 用来把坐标一起缩。
+ */
+export function scaleToImageData(
+  bitmap: ImageBitmap,
+  maxSide: number,
+): { image: ImageData; scale: number } {
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
+  const w = Math.max(1, Math.round(bitmap.width * scale))
+  const h = Math.max(1, Math.round(bitmap.height * scale))
+  const { ctx } = makeCanvas2D(w, h, { willReadFrequently: true })
+  ctx.drawImage(bitmap, 0, 0, w, h)
+  return { image: ctx.getImageData(0, 0, w, h), scale }
+}
+
 /** 取 ImageData 供 CV 管线与气色采样使用 */
 export function toImageData(bitmap: ImageBitmap): ImageData {
   const { ctx } = makeCanvas2D(bitmap.width, bitmap.height, { willReadFrequently: true })

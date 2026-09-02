@@ -44,7 +44,7 @@ export function PalmChart({
       <div className="p-4 pb-3">
         <h2 className="font-title mb-1 text-sm tracking-[0.2em]">掌纹标注</h2>
         <p className="text-[11px] leading-relaxed text-subtle">
-          图上 {marked} 处标号对应下方条目。实心号为掌线，空心号为掌丘。
+          你那张照片上的 {marked} 处标号对应下方条目。实心号为掌线，空心号为掌丘。
           断语与释义均来自本次实测，未经 AI 改写。
         </p>
       </div>
@@ -71,7 +71,13 @@ export function PalmChart({
             <div className="min-w-0 flex-1">
               <p className="text-[13px] leading-snug">
                 <span className="font-title tracking-[0.08em]">{mark.name}</span>
-                {!mark.anchor && <span className="ml-2 text-[11px] text-subtle">未测到 · 图上未标号</span>}
+                {/* 图上没号有两种原因，别混成一句：没测到，还是测到了但号落在照片外 */}
+                {!mark.anchor &&
+                  (items.length ? (
+                    <span className="ml-2 text-[11px] text-subtle">已测到 · 标号落在照片之外</span>
+                  ) : (
+                    <span className="ml-2 text-[11px] text-subtle">未测到 · 图上未标号</span>
+                  ))}
               </p>
 
               {items.map((f) => (
