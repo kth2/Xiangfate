@@ -171,3 +171,117 @@ export function marksToSourceSpace(marks: PalmMark[], frame: SourceFrame): PalmM
     }
   })
 }
+
+/* ============================================================
+   取景：把画面裁到手上，并把手扶正
+   ============================================================ */
+
+/**
+ * 原照片坐标 → 展示画面坐标 的仿射（与 canvas setTransform 的参数同序）。
+ *   x' = a·x + c·y + e
+ *   y' = b·x + d·y + f
+ */
+export interface HandView {
+  width: number
+  height: number
+  a: number
+  b: number
+  c: number
+  d: number
+  e: number
+  f: number
+}
+
+/**
+ * 留白：按手的长边计。
+ *
+ * 21 个关键点全是**关节**，掌缘（尤其大鱼际与腕下）都在它们之外，
+ * 所以外扩一圈才框得住整只手。
+ *
+ * ⚠️ 这个 0.16 是我挑的，但它与本项目其他判线不同性质：**只影响取景**，
+ * 不参与任何度量、不进任何断语。框松一点框紧一点，读出来的东西一模一样。
+ */
+const VIEW_PAD = 0.16
+
+/**
+ * 依关键点把画面裁到手上，并把手扶正。
+ *
+ * 与 normalizePalm 的分工要分清楚：
+ *   · normalizePalm 做的是**度量帧** —— 单应变换，所有位置先验都定在它上面，
+ *     而它目前是坏的（任何手形下都有关节点被甩出画布），正等定标数据。
+ *   · 这里做的是**取景** —— 只有旋转、缩放、平移（相似变换），没有透视分量，
+ *     因此不存在那种消影线穿过掌面的病态：手绝不会被折过去或甩出画面。
+ *
+ * 扶正取「腕 → 中指根」这条轴，把它转到竖直向上，与相书掌图的摆法一致，
+ * 也与那张参考长图一样。
+ */
+export function handViewTransform(
+  landmarksPx: P2[],
+  maxSide: number,
+  pad = VIEW_PAD,
+): HandView {
+  const wrist = landmarksPx[HAND_VIEW_WRIST]
+  const mid = landmarksPx[HAND_VIEW_MIDDLE_MCP]
+
+  // 让「腕 → 中指根」指向正上方（画面 y 向下，故目标角为 −90°）
+  const alpha = Math.atan2(mid.y - wrist.y, mid.x - wrist.x)
+  const phi = -Math.PI / 2 - alpha
+  const cos = Math.cos(phi)
+  const sin = Math.sin(phi)
+
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const p of landmarksPx) {
+    const rx = cos * p.x - sin * p.y
+    const ry = sin * p.x + cos * p.y
+    minX = Math.min(minX, rx)
+    maxX = Math.max(maxX, rx)
+    minY = Math.min(minY, ry)
+    maxY = Math.max(maxY, ry)
+  }
+
+  const m = pad * Math.max(maxX - minX, maxY - minY)
+  minX -= m
+  minY -= m
+  maxX += m
+  maxY += m
+
+  const boxW = Math.max(1e-6, maxX - minX)
+  const boxH = Math.max(1e-6, maxY - minY)
+  const scale = maxSide / Math.max(boxW, boxH)
+
+  return {
+    width: Math.max(1, Math.round(boxW * scale)),
+    height: Math.max(1, Math.round(boxH * scale)),
+    a: scale * cos,
+    b: scale * sin,
+    c: -scale * sin,
+    d: scale * cos,
+    e: -minX * scale,
+    f: -minY * scale,
+  }
+}
+
+/** 21 点里取景只用到这两个 —— 与 landmarks.ts 的 HAND 同源，避免把整张表引进来 */
+const HAND_VIEW_WRIST = 0
+const HAND_VIEW_MIDDLE_MCP = 9
+
+export function applyView(v: HandView, p: P2): P2 {
+  return { x: v.a * p.x + v.c * p.y + v.e, y: v.b * p.x + v.d * p.y + v.f }
+}
+
+/** 把原照片坐标的标号搬到展示画面坐标；落到画面外的标号不落 */
+export function marksToViewSpace(marks: PalmMark[], v: HandView): PalmMark[] {
+  const inside = (p: P2): boolean => p.x >= 0 && p.x <= v.width && p.y >= 0 && p.y <= v.height
+  return marks.map((m) => {
+    const path = m.path?.map((p) => applyView(v, p))
+    const anchor = m.anchor ? applyView(v, m.anchor) : null
+    return {
+      ...m,
+      anchor: anchor && inside(anchor) ? anchor : null,
+      ...(path ? { path } : {}),
+    }
+  })
+}

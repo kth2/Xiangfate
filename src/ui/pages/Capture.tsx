@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { getTypeSpec, isAnalysisType, type ShotSpec } from '@/core/registry'
-import { captureVideoBurst, loadImageFile, scaleToImageData } from '@/core/image'
+import { captureVideoBurst, loadImageFile, renderAffineImageData } from '@/core/image'
 import {
   cameraErrorMessage,
   cameraUnavailableReason,
@@ -29,7 +29,12 @@ import {
 } from '@/modules/shouxiang/pipeline'
 import type { SurveyAnswers } from '@/modules/tixiang/survey'
 import type { P2 } from '@/core/geom'
-import { buildPalmMarks, marksToSourceSpace } from '@/modules/shouxiang/overlay'
+import {
+  buildPalmMarks,
+  handViewTransform,
+  marksToSourceSpace,
+  marksToViewSpace,
+} from '@/modules/shouxiang/overlay'
 import type {
   AnalysisEnvelope,
   PalmLineName,
@@ -67,7 +72,10 @@ interface Captured {
  */
 const BURST_FRAMES = 5
 
-/** 报告页标注图的长边上限。够看清掌纹，又不至于让 ImageData 常驻几十 MB */
+/**
+ * 报告页标注图的长边上限。够看清掌纹，又不至于让 ImageData 常驻几十 MB
+ * （手机直出 4000×3000 的原图做成 ImageData 就是 48MB）。
+ */
 const OVERLAY_MAX_SIDE = 900
 
 export function Capture() {
@@ -428,21 +436,29 @@ export function Capture() {
            * 只放进内存 store，不落库：照片本来就不保存。
            */
           const shownFor = handShots[0]
-          const { image: shown, scale } = scaleToImageData(shownFor.bitmap, OVERLAY_MAX_SIDE)
+          const lmPx = shownFor.detection.landmarks.map((p) => ({
+            x: p.x * primary.srcWidth,
+            y: p.y * primary.srcHeight,
+          }))
+          const view = handViewTransform(lmPx, OVERLAY_MAX_SIDE)
+
           setPalmOverlay({
-            image: shown,
-            marks: marksToSourceSpace(
-              buildPalmMarks(
-                resolvePalmLines(primary, correctionsRef.current),
-                (env.derived as ShouxiangDerived).mountProfile,
+            image: renderAffineImageData(shownFor.bitmap, view),
+            marks: marksToViewSpace(
+              marksToSourceSpace(
+                buildPalmMarks(
+                  resolvePalmLines(primary, correctionsRef.current),
+                  (env.derived as ShouxiangDerived).mountProfile,
+                ),
+                {
+                  H: primary.H,
+                  mirrored: primary.mirrored,
+                  srcWidth: primary.srcWidth,
+                  srcHeight: primary.srcHeight,
+                  scale: 1,
+                },
               ),
-              {
-                H: primary.H,
-                mirrored: primary.mirrored,
-                srcWidth: primary.srcWidth,
-                srcHeight: primary.srcHeight,
-                scale,
-              },
+              view,
             ),
           })
           break

@@ -133,22 +133,20 @@ async function canvasToObjectUrl(canvas: AnyCanvas): Promise<string> {
 }
 
 /**
- * 把位图缩到长边不超过 maxSide，返回 ImageData 与实际缩放比。
+ * 按给定仿射把位图画进一块新画布，取回 ImageData。
  *
- * 报告页要在原照片上画标注，而手机直出的照片动辄 4000×3000 ——
- * 那就是 48MB 的 ImageData 常驻内存。缩到长边 900 足够看清掌纹，
- * 内存降到 3MB 上下。返回的 scale 用来把坐标一起缩。
+ * 报告页用它把画面裁到手上并把手扶正 —— 参数与 canvas setTransform 同序。
+ * 只做旋转/缩放/平移，没有透视分量，所以不会出现归一化那种把手折过去的情况。
  */
-export function scaleToImageData(
+export function renderAffineImageData(
   bitmap: ImageBitmap,
-  maxSide: number,
-): { image: ImageData; scale: number } {
-  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
-  const w = Math.max(1, Math.round(bitmap.width * scale))
-  const h = Math.max(1, Math.round(bitmap.height * scale))
-  const { ctx } = makeCanvas2D(w, h, { willReadFrequently: true })
-  ctx.drawImage(bitmap, 0, 0, w, h)
-  return { image: ctx.getImageData(0, 0, w, h), scale }
+  t: { width: number; height: number; a: number; b: number; c: number; d: number; e: number; f: number },
+): ImageData {
+  const { ctx } = makeCanvas2D(t.width, t.height, { willReadFrequently: true })
+  ctx.setTransform(t.a, t.b, t.c, t.d, t.e, t.f)
+  ctx.drawImage(bitmap, 0, 0)
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  return ctx.getImageData(0, 0, t.width, t.height)
 }
 
 /** 取 ImageData 供 CV 管线与气色采样使用 */

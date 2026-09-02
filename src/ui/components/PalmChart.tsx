@@ -44,8 +44,8 @@ export function PalmChart({
       <div className="p-4 pb-3">
         <h2 className="font-title mb-1 text-sm tracking-[0.2em]">掌纹标注</h2>
         <p className="text-[11px] leading-relaxed text-subtle">
-          你那张照片上的 {marked} 处标号对应下方条目。实心号为掌线，空心号为掌丘。
-          断语与释义均来自本次实测，未经 AI 改写。
+          取自你那张照片，已裁到手掌并扶正。图上 {marked} 处标号对应下方条目，
+          实心号为掌线，空心号为掌丘。断语与释义均来自本次实测，未经 AI 改写。
         </p>
       </div>
 

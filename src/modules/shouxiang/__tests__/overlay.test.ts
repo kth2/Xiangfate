@@ -7,7 +7,14 @@
 
 import { describe, expect, it } from 'vitest'
 import type { MountBand, MountName, PalmLineName } from '@/core/types'
-import { buildPalmMarks, marksToSourceSpace, type PalmMark } from '../overlay'
+import {
+  applyView,
+  buildPalmMarks,
+  handViewTransform,
+  marksToSourceSpace,
+  marksToViewSpace,
+  type PalmMark,
+} from '../overlay'
 import { CANVAS, CANVAS_ANCHORS, MOUNTS } from '../landmarks'
 import { applyHomography, findHomography } from '@/cv/homography'
 import type { P2 } from '@/core/geom'
@@ -294,5 +301,93 @@ describe('映回原照片', () => {
     expect(back.map((m) => m.n)).toEqual(marks.map((m) => m.n))
     expect(back.map((m) => m.name)).toEqual(marks.map((m) => m.name))
     expect(back.map((m) => m.featureId)).toEqual(marks.map((m) => m.featureId))
+  })
+})
+
+/* ============================================================
+   取景：裁到手上、把手扶正
+   ============================================================ */
+
+describe('取景', () => {
+  /** 一只手的 21 点（原照片像素）。可整体旋转，用来验证扶正 */
+  function handPx(deg = 0, cx = 500, cy = 500): P2[] {
+    const base: [number, number][] = [
+      [500, 920], [340, 820], [260, 720], [200, 630], [160, 550],
+      [380, 500], [360, 380], [350, 300], [340, 230],
+      [500, 470], [500, 340], [500, 250], [500, 170],
+      [610, 490], [630, 360], [640, 280], [650, 210],
+      [710, 550], [750, 440], [770, 380], [790, 320],
+    ]
+    const r = (deg * Math.PI) / 180
+    return base.map(([x, y]) => ({
+      x: cx + (x - cx) * Math.cos(r) - (y - cy) * Math.sin(r),
+      y: cy + (x - cx) * Math.sin(r) + (y - cy) * Math.cos(r),
+    }))
+  }
+
+  it('是相似变换 —— 只有旋转与等比缩放，没有透视分量', () => {
+    const v = handViewTransform(handPx(), 900)
+    // a == d 且 b == −c 正是「旋转 + 等比缩放」的签名；有了它就不可能把手折过去
+    expect(v.a).toBeCloseTo(v.d, 10)
+    expect(v.b).toBeCloseTo(-v.c, 10)
+    expect(v.a * v.d - v.b * v.c).toBeGreaterThan(0)
+  })
+
+  it('21 个关键点全部落在画面内 —— 归一化那条路上做不到这一点', () => {
+    for (const deg of [0, 25, -40, 90, 180]) {
+      const lm = handPx(deg)
+      const v = handViewTransform(lm, 900)
+      for (const [i, p] of lm.entries()) {
+        const q = applyView(v, p)
+        expect(q.x, `第 ${i} 点转出画面左右`).toBeGreaterThanOrEqual(0)
+        expect(q.x).toBeLessThanOrEqual(v.width)
+        expect(q.y, `第 ${i} 点转出画面上下`).toBeGreaterThanOrEqual(0)
+        expect(q.y).toBeLessThanOrEqual(v.height)
+      }
+    }
+  })
+
+  it('手被扶正：中指根一定在腕的正上方', () => {
+    for (const deg of [0, 37, -62, 150, 180]) {
+      const lm = handPx(deg)
+      const v = handViewTransform(lm, 900)
+      const wrist = applyView(v, lm[0])
+      const mid = applyView(v, lm[9])
+      expect(mid.y, `${deg}° 时没扶正`).toBeLessThan(wrist.y)
+      // 「正上方」：横向偏移相对纵向落差可以忽略
+      expect(Math.abs(mid.x - wrist.x)).toBeLessThan(Math.abs(mid.y - wrist.y) * 0.05)
+    }
+  })
+
+  it('照片怎么歪，取景后都是同一张画面', () => {
+    const a = handViewTransform(handPx(0), 900)
+    const b = handViewTransform(handPx(53), 900)
+    expect(b.width).toBeCloseTo(a.width, 0)
+    expect(b.height).toBeCloseTo(a.height, 0)
+    // 同一个关键点在两个取景里应落到同一处
+    for (const i of [0, 4, 9, 17, 20]) {
+      const pa = applyView(a, handPx(0)[i])
+      const pb = applyView(b, handPx(53)[i])
+      expect(pb.x).toBeCloseTo(pa.x, 0)
+      expect(pb.y).toBeCloseTo(pa.y, 0)
+    }
+  })
+
+  it('长边正好等于给定上限，手填满画面', () => {
+    const v = handViewTransform(handPx(), 900)
+    expect(Math.max(v.width, v.height)).toBe(900)
+  })
+
+  it('标号跟着搬到画面坐标，落到画面外的不落号', () => {
+    const v = handViewTransform(handPx(), 900)
+    const onHand: PalmMark = {
+      n: 1, name: '生命线', kind: 'line', featureId: 'hand.line.life',
+      anchor: { x: 420, y: 620 }, path: [{ x: 400, y: 560 }, { x: 440, y: 700 }],
+    }
+    const offFrame: PalmMark = { ...onHand, n: 2, anchor: { x: -9000, y: -9000 } }
+    const [a, b] = marksToViewSpace([onHand, offFrame], v)
+    expect(a.anchor).not.toBeNull()
+    expect(a.path![0]).not.toEqual(onHand.path![0])
+    expect(b.anchor).toBeNull()
   })
 })
