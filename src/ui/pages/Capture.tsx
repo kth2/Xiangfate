@@ -90,7 +90,7 @@ function buildPalmView(shot: HandShot, a: PalmAnalysis) {
     x: p.x * a.srcWidth,
     y: p.y * a.srcHeight,
   }))
-  const view = handViewTransform(lmPx, OVERLAY_MAX_SIDE)
+  const view = handViewTransform(lmPx, { width: a.srcWidth, height: a.srcHeight }, OVERLAY_MAX_SIDE)
   const frame: SourceFrame = {
     H: a.H,
     mirrored: a.mirrored,

@@ -227,6 +227,7 @@ const VIEW_PAD = 0.16
  */
 export function handViewTransform(
   landmarksPx: P2[],
+  src: { width: number; height: number },
   maxSide: number,
   pad = VIEW_PAD,
 ): HandView {
@@ -253,24 +254,70 @@ export function handViewTransform(
   }
 
   const m = pad * Math.max(maxX - minX, maxY - minY)
-  minX -= m
-  minY -= m
-  maxX += m
-  maxY += m
+  const box = { x0: minX - m, y0: minY - m, x1: maxX + m, y1: maxY + m }
+  const cx = (box.x0 + box.x1) / 2
+  const cy = (box.y0 + box.y1) / 2
 
-  const boxW = Math.max(1e-6, maxX - minX)
-  const boxH = Math.max(1e-6, maxY - minY)
+  /**
+   * 取景框必须整个落在原照片之内。
+   *
+   * ⚠️ 这一条原先漏了：handViewTransform 当时根本不知道照片有多大，
+   * 于是「手的包围盒 + 留白」很容易越出照片边界 —— 越出去那片像素
+   * drawImage 从来不写，留在画布上就是透明，深色主题下显示为**黑色楔形**。
+   * 用户看到的那道斜边，正是原照片被转过来的边。
+   *
+   * 处理方式是把框按中心等比收小到刚好装得下。手若本来就拍出了画面，
+   * 收小会切掉一点手 —— 但那一点本来就没被拍下来，
+   * 显示照片里真实存在的部分，比补一片黑要诚实。
+   */
+  const fits = (t: number): boolean => {
+    const hw = ((box.x1 - box.x0) / 2) * t
+    const hh = ((box.y1 - box.y0) / 2) * t
+    for (const [sx, sy] of [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ] as const) {
+      const rx = cx + sx * hw
+      const ry = cy + sy * hh
+      // 转回原照片坐标：R(−φ)
+      const x = cos * rx + sin * ry
+      const y = -sin * rx + cos * ry
+      if (x < 0 || y < 0 || x > src.width || y > src.height) return false
+    }
+    return true
+  }
+
+  let t = 1
+  if (!fits(1)) {
+    let lo = 0
+    let hi = 1
+    for (let i = 0; i < 30; i++) {
+      const midT = (lo + hi) / 2
+      if (fits(midT)) lo = midT
+      else hi = midT
+    }
+    t = lo
+  }
+
+  const boxW = Math.max(1e-6, (box.x1 - box.x0) * t)
+  const boxH = Math.max(1e-6, (box.y1 - box.y0) * t)
+  const x0 = cx - boxW / 2
+  const y0 = cy - boxH / 2
   const scale = maxSide / Math.max(boxW, boxH)
 
   return {
-    width: Math.max(1, Math.round(boxW * scale)),
-    height: Math.max(1, Math.round(boxH * scale)),
+    // 向下取整而非四舍五入：取上去会让画面比框还大一点点，
+    // 边上那一行像素就没有内容 —— 正是要避免的那类空白
+    width: Math.max(1, Math.floor(boxW * scale)),
+    height: Math.max(1, Math.floor(boxH * scale)),
     a: scale * cos,
     b: scale * sin,
     c: -scale * sin,
     d: scale * cos,
-    e: -minX * scale,
-    f: -minY * scale,
+    e: -x0 * scale,
+    f: -y0 * scale,
   }
 }
 

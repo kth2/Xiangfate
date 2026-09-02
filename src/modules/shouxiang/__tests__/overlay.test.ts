@@ -310,9 +310,19 @@ describe('映回原照片', () => {
    取景：裁到手上、把手扶正
    ============================================================ */
 
+/**
+ * 取景测试用两种照片：
+ *   · ROOMY —— 手在大画面正中，四周有余量，因此**不会**触发裁剪。
+ *     旋转不变、扶正、全部关键点入画这几条要在这种条件下验，
+ *     否则验的是裁剪而不是取景。
+ *   · TIGHT —— 手贴着画面边缘，用来验裁剪本身。
+ */
+const ROOMY = { width: 2000, height: 2000 }
+const TIGHT = { width: 1000, height: 1000 }
+
 describe('取景', () => {
   /** 一只手的 21 点（原照片像素）。可整体旋转，用来验证扶正 */
-  function handPx(deg = 0, cx = 500, cy = 500): P2[] {
+  function handPx(deg = 0, cx = 1000, cy = 1000): P2[] {
     const base: [number, number][] = [
       [500, 920], [340, 820], [260, 720], [200, 630], [160, 550],
       [380, 500], [360, 380], [350, 300], [340, 230],
@@ -320,25 +330,63 @@ describe('取景', () => {
       [610, 490], [630, 360], [640, 280], [650, 210],
       [710, 550], [750, 440], [770, 380], [790, 320],
     ]
+    // 先把手挪到 (cx, cy) 附近，再绕该点旋转
+    const dx = cx - 475
+    const dy = cy - 545
     const r = (deg * Math.PI) / 180
-    return base.map(([x, y]) => ({
-      x: cx + (x - cx) * Math.cos(r) - (y - cy) * Math.sin(r),
-      y: cy + (x - cx) * Math.sin(r) + (y - cy) * Math.cos(r),
-    }))
+    return base.map(([x0, y0]) => {
+      const x = x0 + dx
+      const y = y0 + dy
+      return {
+        x: cx + (x - cx) * Math.cos(r) - (y - cy) * Math.sin(r),
+        y: cy + (x - cx) * Math.sin(r) + (y - cy) * Math.cos(r),
+      }
+    })
+  }
+
+  /** 展示画面坐标 → 原照片坐标。相似变换的逆，用来验取景框有没有越出照片 */
+  const toSource = (v: ReturnType<typeof handViewTransform>, p: P2): P2 => {
+    const det = v.a * v.d - v.b * v.c
+    return {
+      x: (v.d * (p.x - v.e) - v.c * (p.y - v.f)) / det,
+      y: (-v.b * (p.x - v.e) + v.a * (p.y - v.f)) / det,
+    }
   }
 
   it('是相似变换 —— 只有旋转与等比缩放，没有透视分量', () => {
-    const v = handViewTransform(handPx(), 900)
+    const v = handViewTransform(handPx(), ROOMY, 900)
     // a == d 且 b == −c 正是「旋转 + 等比缩放」的签名；有了它就不可能把手折过去
     expect(v.a).toBeCloseTo(v.d, 10)
     expect(v.b).toBeCloseTo(-v.c, 10)
     expect(v.a * v.d - v.b * v.c).toBeGreaterThan(0)
   })
 
-  it('21 个关键点全部落在画面内 —— 归一化那条路上做不到这一点', () => {
+  it('画面四角一律落在原照片之内 —— 不留一块没有像素的空白', () => {
+    // 这条是实测逼出来的：取景原先不知道照片有多大，框一越界，
+    // 越出去那片 drawImage 从来不写，深色主题下就是一块**黑色楔形**。
+    for (const photo of [ROOMY, TIGHT]) {
+      for (const deg of [0, 25, -40, 90, 180]) {
+        const v = handViewTransform(handPx(deg, photo.width / 2, photo.height / 2), photo, 900)
+        for (const corner of [
+          { x: 0, y: 0 },
+          { x: v.width, y: 0 },
+          { x: v.width, y: v.height },
+          { x: 0, y: v.height },
+        ]) {
+          const q = toSource(v, corner)
+          expect(q.x, `${photo.width}px 照片 ${deg}° 时取景框越出左右`).toBeGreaterThanOrEqual(-1e-6)
+          expect(q.x).toBeLessThanOrEqual(photo.width + 1e-6)
+          expect(q.y, `${photo.width}px 照片 ${deg}° 时取景框越出上下`).toBeGreaterThanOrEqual(-1e-6)
+          expect(q.y).toBeLessThanOrEqual(photo.height + 1e-6)
+        }
+      }
+    }
+  })
+
+  it('照片四周有余量时，21 个关键点全部落在画面内', () => {
     for (const deg of [0, 25, -40, 90, 180]) {
       const lm = handPx(deg)
-      const v = handViewTransform(lm, 900)
+      const v = handViewTransform(lm, ROOMY, 900)
       for (const [i, p] of lm.entries()) {
         const q = applyView(v, p)
         expect(q.x, `第 ${i} 点转出画面左右`).toBeGreaterThanOrEqual(0)
@@ -349,10 +397,22 @@ describe('取景', () => {
     }
   })
 
+  it('手贴着画面边缘时宁可切掉一点，也不补一片黑', () => {
+    // 手若本来就拍出了画面，那一部分本来就没被拍下来 —— 补黑只是假装有内容
+    const lm = handPx(0, 500, 620) // 腕已接近照片下缘
+    const v = handViewTransform(lm, TIGHT, 900)
+    const outside = lm.filter((p) => {
+      const q = applyView(v, p)
+      return q.x < 0 || q.y < 0 || q.x > v.width || q.y > v.height
+    })
+    // 切是允许的，但不该切掉半只手
+    expect(outside.length).toBeLessThan(lm.length / 2)
+  })
+
   it('手被扶正：中指根一定在腕的正上方', () => {
     for (const deg of [0, 37, -62, 150, 180]) {
       const lm = handPx(deg)
-      const v = handViewTransform(lm, 900)
+      const v = handViewTransform(lm, ROOMY, 900)
       const wrist = applyView(v, lm[0])
       const mid = applyView(v, lm[9])
       expect(mid.y, `${deg}° 时没扶正`).toBeLessThan(wrist.y)
@@ -361,9 +421,9 @@ describe('取景', () => {
     }
   })
 
-  it('照片怎么歪，取景后都是同一张画面', () => {
-    const a = handViewTransform(handPx(0), 900)
-    const b = handViewTransform(handPx(53), 900)
+  it('照片怎么歪，取景后都是同一张画面（四周有余量、无需裁剪时）', () => {
+    const a = handViewTransform(handPx(0), ROOMY, 900)
+    const b = handViewTransform(handPx(53), ROOMY, 900)
     expect(b.width).toBeCloseTo(a.width, 0)
     expect(b.height).toBeCloseTo(a.height, 0)
     // 同一个关键点在两个取景里应落到同一处
@@ -376,15 +436,15 @@ describe('取景', () => {
   })
 
   it('长边正好等于给定上限，手填满画面', () => {
-    const v = handViewTransform(handPx(), 900)
+    const v = handViewTransform(handPx(), ROOMY, 900)
     expect(Math.max(v.width, v.height)).toBe(900)
   })
 
   it('标号跟着搬到画面坐标，落到画面外的不落号', () => {
-    const v = handViewTransform(handPx(), 900)
+    const v = handViewTransform(handPx(), ROOMY, 900)
     const onHand: PalmMark = {
       n: 1, name: '生命线', kind: 'line', featureId: 'hand.line.life',
-      anchor: { x: 420, y: 620 }, path: [{ x: 400, y: 560 }, { x: 440, y: 700 }],
+      anchor: { x: 920, y: 1120 }, path: [{ x: 900, y: 1060 }, { x: 940, y: 1200 }],
     }
     const offFrame: PalmMark = { ...onHand, n: 2, anchor: { x: -9000, y: -9000 } }
     const [a, b] = marksToViewSpace([onHand, offFrame], v)
@@ -465,7 +525,7 @@ describe('画布 → 展示画面 的复合映射', () => {
     }))
     lmPx[0] = { x: 500, y: 920 }
     lmPx[9] = { x: 500, y: 470 }
-    const view = handViewTransform(lmPx, 900)
+    const view = handViewTransform(lmPx, { width: 1000, height: 1000 }, 900)
 
     const composed = canvasToView(frame, view)
     const stepwise = sourcePointMapper(frame)
