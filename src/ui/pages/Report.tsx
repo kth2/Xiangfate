@@ -13,6 +13,7 @@ import { Markdown } from '../components/Markdown'
 import { ScoreCardView } from '../components/ScoreCard'
 import { FeatureList } from '../components/FeatureList'
 import { VerdictList } from '../components/VerdictList'
+import { PalmChart } from '../components/PalmChart'
 
 type Stage = 'idle' | 'streaming' | 'regenerating' | 'done' | 'error'
 
@@ -28,6 +29,11 @@ export function Report() {
 
   const type = useAnalysis((s) => s.type)
   const envelopeFromStore = useAnalysis((s) => s.envelope)
+  /**
+   * 掌图只在本次会话内有效 —— 照片不落库，从历史记录打开就没有。
+   * 那种情况下这一栏整块不出现，文字部分照常。
+   */
+  const palmOverlay = useAnalysis((s) => s.palmOverlay)
   const reset = useAnalysis((s) => s.reset)
 
   const { provider: providerId, configs } = useSettings()
@@ -276,6 +282,15 @@ export function Report() {
           features={envelope.features}
           accent={accent}
         />
+
+        {palmOverlay && (
+          <PalmChart
+            overlay={palmOverlay}
+            features={envelope.features}
+            unavailable={envelope.unavailable}
+            accent={accent}
+          />
+        )}
 
         <VerdictList features={envelope.features} accent={accent} />
 

@@ -21,6 +21,7 @@ import { buildTixiangEnvelope } from '@/modules/tixiang/pipeline'
 import { buildGuxiangEnvelope } from '@/modules/guxiang/pipeline'
 import {
   analyzePalm,
+  resolvePalmLines,
   buildShouxiangEnvelope,
   needsCorrection,
   type HandShot,
@@ -28,7 +29,13 @@ import {
 } from '@/modules/shouxiang/pipeline'
 import type { SurveyAnswers } from '@/modules/tixiang/survey'
 import type { P2 } from '@/core/geom'
-import type { AnalysisEnvelope, PalmLineName, ShotKind } from '@/core/types'
+import { buildPalmMarks } from '@/modules/shouxiang/overlay'
+import type {
+  AnalysisEnvelope,
+  PalmLineName,
+  ShotKind,
+  ShouxiangDerived,
+} from '@/core/types'
 import { useAnalysis } from '@/store/analysis.store'
 import { CAPTURE_PRIVACY } from '@/copy/disclaimer.zh-CN'
 import { HAND_CONNECTIONS, LandmarkOverlay, POSE_CONNECTIONS } from '../components/LandmarkOverlay'
@@ -67,6 +74,7 @@ export function Capture() {
 
   const start = useAnalysis((s) => s.start)
   const setEnvelope = useAnalysis((s) => s.setEnvelope)
+  const setPalmOverlay = useAnalysis((s) => s.setPalmOverlay)
   const subject = useAnalysis((s) => s.subject)
 
   const [stage, setStage] = useState<Stage>(spec?.caveat ? 'intro' : 'pick')
@@ -403,6 +411,19 @@ export function Capture() {
             { shots: handShots, subject, dominantHand: handShots[0].side, corrections: correctionsRef.current },
             palmAnalysesRef.current,
           )
+
+          /**
+           * 报告页的掌图标注。走 resolvePalmLines 而不是直接用 primary.lines ——
+           * 用户校正过的线必须是图上画的那条，否则图与文会对不上。
+           * 只放进内存 store，不落库：照片本来就不保存。
+           */
+          setPalmOverlay({
+            image: primary.normalized,
+            marks: buildPalmMarks(
+              resolvePalmLines(primary, correctionsRef.current),
+              (env.derived as ShouxiangDerived).mountProfile,
+            ),
+          })
           break
         }
       }

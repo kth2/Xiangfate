@@ -70,6 +70,24 @@ export async function analyzePalm(shot: HandShot): Promise<PalmAnalysis> {
   }
 }
 
+/**
+ * 把用户校正合并进自动识别的掌线，得到「这次实际采信的六条线」。
+ *
+ * 抽出来是因为报告页的掌图也要照着同一份结果描线 ——
+ * 各算各的就会出现「图上画的是自动识别，文字说的是你确认过的」这种错位。
+ */
+export function resolvePalmLines(
+  primary: PalmAnalysis,
+  corrections?: Partial<Record<PalmLineName, P2[]>>,
+): Map<PalmLineName, LineMeasure> {
+  const lines = new Map(primary.lines)
+  for (const [name, pts] of Object.entries(corrections ?? {})) {
+    if (!pts?.length) continue
+    lines.set(name as PalmLineName, measureCorrected(name as PalmLineName, pts, primary.response))
+  }
+  return lines
+}
+
 /** 第二步：把（可能经过校正的）分析结果拼成 envelope */
 export function buildShouxiangEnvelope(
   input: BuildHandInput,
@@ -85,12 +103,7 @@ export function buildShouxiangEnvelope(
   const primary = analyses[primaryIdx]
   const primaryShot = input.shots[primaryIdx] ?? input.shots[0]
 
-  // 应用用户校正
-  const lines = new Map(primary.lines)
-  for (const [name, pts] of Object.entries(input.corrections ?? {})) {
-    if (!pts?.length) continue
-    lines.set(name as PalmLineName, measureCorrected(name as PalmLineName, pts, primary.response))
-  }
+  const lines = resolvePalmLines(primary, input.corrections)
 
   const src = toImageData(primaryShot.bitmap)
   const xs = primaryShot.detection.landmarks.map((p) => p.x)

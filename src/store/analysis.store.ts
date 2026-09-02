@@ -8,6 +8,7 @@
 
 import { create } from 'zustand'
 import type { AnalysisEnvelope, AnalysisType, ShotKind, Subject } from '@/core/types'
+import type { PalmMark } from '@/modules/shouxiang/overlay'
 
 export type Phase = 'idle' | 'capturing' | 'extracting' | 'ready' | 'generating' | 'done' | 'error'
 
@@ -20,12 +21,26 @@ export interface CapturedShot {
   height: number
 }
 
+/**
+ * 报告页的掌图标注。
+ *
+ * ⚠️ 这里装着一张手掌照（归一化后的标准掌图），因此适用本文件顶上的同一条红线：
+ * 只在内存里，reset() 必须清掉，绝不落库。
+ * 从历史记录打开的报告拿不到它 —— 那是对的，照片本来就没有被保存。
+ */
+export interface PalmOverlay {
+  image: ImageData
+  marks: PalmMark[]
+}
+
 interface AnalysisState {
   type: AnalysisType | null
   phase: Phase
   shots: CapturedShot[]
   subject: Subject
   envelope: AnalysisEnvelope | null
+  /** 手相专用：报告页的掌图标注。只在本次会话内有效 */
+  palmOverlay: PalmOverlay | null
   /** AI 生成的报告正文（流式累积） */
   report: string
   error: string | null
@@ -37,6 +52,7 @@ interface AnalysisState {
   setSubject: (patch: Partial<Subject>) => void
   setPhase: (phase: Phase) => void
   setEnvelope: (envelope: AnalysisEnvelope) => void
+  setPalmOverlay: (overlay: PalmOverlay | null) => void
   appendReport: (chunk: string) => void
   setReport: (report: string) => void
   setError: (error: string | null) => void
@@ -60,6 +76,7 @@ export const useAnalysis = create<AnalysisState>((set, get) => ({
   shots: [],
   subject: { gender: 'unspecified', isSelf: true, focusTopics: [] },
   envelope: null,
+  palmOverlay: null,
   report: '',
   error: null,
 
@@ -88,6 +105,7 @@ export const useAnalysis = create<AnalysisState>((set, get) => ({
   setSubject: (patch) => set((s) => ({ subject: { ...s.subject, ...patch } })),
   setPhase: (phase) => set({ phase }),
   setEnvelope: (envelope) => set({ envelope }),
+  setPalmOverlay: (palmOverlay) => set({ palmOverlay }),
   appendReport: (chunk) => set((s) => ({ report: s.report + chunk })),
   setReport: (report) => set({ report }),
   setError: (error) => set({ error, phase: error ? 'error' : get().phase }),
@@ -106,6 +124,7 @@ export const useAnalysis = create<AnalysisState>((set, get) => ({
       shots: [],
       subject: { gender: 'unspecified', isSelf: true, focusTopics: [] },
       envelope: null,
+      palmOverlay: null,
       report: '',
       error: null,
     })

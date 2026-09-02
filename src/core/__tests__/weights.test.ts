@@ -92,6 +92,24 @@ function extractFeatureIds(src: string): string[] {
   }
   for (const m of src.matchAll(new RegExp(`const id = '(${ID_CHARS})'`, 'g'))) out.add(m[1])
 
+  /**
+   * id 构造器：`export const lineFeatureId = (name: X): string => `hand.line.${LINE_ID[name]}``
+   *
+   * 这一支是被一次正常重构逼出来的。掌线 id 原先在 rules.ts 里写了三遍字面量，
+   * 抽成一个构造器之后上面那几条正则全都扫不到了 —— 于是这条测试反过来断言
+   * 十二个活着的权重键是「死键」。**源码文本启发式的通病：改写法就会说谎。**
+   * 认构造器的声明本身（而不是调用点），比再补一条调用点正则稳：
+   * 无论它被调用几次、在哪里调用，声明只有一处。
+   */
+  for (const m of src.matchAll(
+    new RegExp(
+      `const [A-Za-z0-9_]*[Ii]d = \\([^)]*\\)(?::\\s*string)?\\s*=>\\s*\`(${ID_CHARS})\\$\\{([^}]+)\\}([A-Za-z]*)\``,
+      'g',
+    ),
+  )) {
+    for (const id of expandTemplate(m[1], m[2], m[3])) out.add(id)
+  }
+
   return [...out].sort()
 }
 

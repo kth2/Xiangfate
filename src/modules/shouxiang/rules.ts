@@ -140,7 +140,7 @@ export function applyHandRules(input: HandRuleInput): HandRuleOutput {
         )
       }
       unavailable.push({
-        id: `hand.line.${LINE_ID[name]}`, label: name, reason: 'low_confidence',
+        id: lineFeatureId(name), label: name, reason: 'low_confidence',
         detail: `本次未能在标准掌面上稳定识别出${name}；光线柔和一些重拍，或在校正界面手动指认`,
       })
       continue
@@ -156,7 +156,7 @@ export function applyHandRules(input: HandRuleInput): HandRuleOutput {
       mt.band === 'very_high' ? meaning.excess : mt.band === 'high' ? meaning.high :
       mt.band === 'balanced' ? '发展均衡，无明显偏倚' : meaning.low
     push(
-      `hand.mount.${MOUNT_ID[key]}`, '掌丘',
+      mountFeatureId(key), '掌丘',
       mt.band === 'high' || mt.band === 'very_high' ? `${key}丰满` : mt.band === 'balanced' ? `${key}适中` : `${key}平坦`,
       mt.band, round(mt.fullness), 'inferred', conf('mount'),
       `${key}区域相对掌面的亮度偏移换算后为 ${mt.fullness.toFixed(2)}`,
@@ -236,6 +236,16 @@ const MOUNT_ID: Record<MountKey, string> = {
   金星丘: 'venus', 月丘: 'moon', 火星丘: 'mars',
 }
 
+/**
+ * 特征 id 的唯一出处。
+ *
+ * 报告页的掌图标注要按同一套 id 去 features 里取词。前缀在两处各写一遍，
+ * 迟早会有一处改了另一处没改 —— 那时候图上的号会静静地取不到任何词，
+ * 不报错，只是空着。所以两边都调这里。
+ */
+export const lineFeatureId = (name: PalmLineName): string => `hand.line.${LINE_ID[name]}`
+export const mountFeatureId = (key: MountKey): string => `hand.mount.${MOUNT_ID[key]}`
+
 type PushFn = (
   id: string, category: FeatureCategory, label: string, band: DraftFeature['band'],
   value: string | number, status: DraftFeature['status'], confidence: number,
@@ -248,7 +258,7 @@ function emitLine(
   push: PushFn,
   conf: (m: Parameters<typeof computeConfidence>[2], q?: number) => number,
 ) {
-  const id = `hand.line.${LINE_ID[name]}`
+  const id = lineFeatureId(name)
   // 置信度直接跟匹配分挂钩：勉强匹配上的线不该被当成实测
   const c = conf('palmline') * (L.corrected ? 0.85 : Math.min(1, L.matchScore / 0.7))
   const status: DraftFeature['status'] = L.corrected ? 'self_reported' : 'measured'
