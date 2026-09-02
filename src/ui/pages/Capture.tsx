@@ -34,6 +34,7 @@ import {
   handViewTransform,
   marksToSourceSpace,
   marksToViewSpace,
+  type SourceFrame,
 } from '@/modules/shouxiang/overlay'
 import type {
   AnalysisEnvelope,
@@ -73,10 +74,32 @@ interface Captured {
 const BURST_FRAMES = 5
 
 /**
- * 报告页标注图的长边上限。够看清掌纹，又不至于让 ImageData 常驻几十 MB
+ * 掌图的长边上限。够看清掌纹，又不至于让 ImageData 常驻几十 MB
  * （手机直出 4000×3000 的原图做成 ImageData 就是 48MB）。
  */
 const OVERLAY_MAX_SIDE = 900
+
+/**
+ * 扶正取景后的掌图，外加两套坐标之间的换算。
+ *
+ * 校正界面与报告页共用同一份 —— 各算各的就会出现「两屏画的不是同一张图」，
+ * 而且不报错。
+ */
+function buildPalmView(shot: HandShot, a: PalmAnalysis) {
+  const lmPx = shot.detection.landmarks.map((p) => ({
+    x: p.x * a.srcWidth,
+    y: p.y * a.srcHeight,
+  }))
+  const view = handViewTransform(lmPx, OVERLAY_MAX_SIDE)
+  const frame: SourceFrame = {
+    H: a.H,
+    mirrored: a.mirrored,
+    srcWidth: a.srcWidth,
+    srcHeight: a.srcHeight,
+    scale: 1,
+  }
+  return { view, frame, image: renderAffineImageData(shot.bitmap, view) }
+}
 
 export function Capture() {
   const { type } = useParams()
@@ -106,6 +129,7 @@ export function Capture() {
   /** 换了流就 +1，effect 靠它重新接线；不用 facing 当依赖，免得和「同朝向重开」耦合 */
   const [streamKey, setStreamKey] = useState(0)
   const [palm, setPalm] = useState<PalmAnalysis | null>(null)
+  const [palmView, setPalmView] = useState<ReturnType<typeof buildPalmView> | null>(null)
   const [palmMissing, setPalmMissing] = useState<PalmLineName[]>([])
 
   const capturedRef = useRef<Captured[]>([])
@@ -413,6 +437,7 @@ export function Capture() {
           const missing = needsCorrection(primary)
           if (missing.length && !palm) {
             setPalm(primary)
+            setPalmView(buildPalmView(handShots[0], primary))
             setPalmMissing(missing)
             setStage('correct')
             return
@@ -435,30 +460,18 @@ export function Capture() {
            *
            * 只放进内存 store，不落库：照片本来就不保存。
            */
-          const shownFor = handShots[0]
-          const lmPx = shownFor.detection.landmarks.map((p) => ({
-            x: p.x * primary.srcWidth,
-            y: p.y * primary.srcHeight,
-          }))
-          const view = handViewTransform(lmPx, OVERLAY_MAX_SIDE)
-
+          const shown = palmView ?? buildPalmView(handShots[0], primary)
           setPalmOverlay({
-            image: renderAffineImageData(shownFor.bitmap, view),
+            image: shown.image,
             marks: marksToViewSpace(
               marksToSourceSpace(
                 buildPalmMarks(
                   resolvePalmLines(primary, correctionsRef.current),
                   (env.derived as ShouxiangDerived).mountProfile,
                 ),
-                {
-                  H: primary.H,
-                  mirrored: primary.mirrored,
-                  srcWidth: primary.srcWidth,
-                  srcHeight: primary.srcHeight,
-                  scale: 1,
-                },
+                shown.frame,
               ),
-              view,
+              shown.view,
             ),
           })
           break
@@ -549,18 +562,23 @@ export function Capture() {
   }
 
   /* ---------------- 掌纹校正 ---------------- */
-  if (stage === 'correct' && palm) {
+  if (stage === 'correct' && palm && palmView) {
     return (
       <div className="page px-6 pt-8 pb-10">
         <Header name={spec.name} onBack={() => setStage('result')} backLabel="返回" />
         <div className="rule-gold my-6" />
         <PalmLineCorrector
           analysis={palm}
+          image={palmView.image}
+          view={palmView.view}
+          frame={palmView.frame}
           missing={palmMissing}
           accent={spec.accent}
           onDone={(c) => {
             correctionsRef.current = c
             setPalm(null)
+            // 取景图是一张手掌照，用完就放 —— 报告页那份由 store 单独持有
+            setPalmView(null)
             void finish()
           }}
         />

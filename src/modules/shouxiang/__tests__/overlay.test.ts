@@ -10,15 +10,17 @@ import type { MountBand, MountName, PalmLineName } from '@/core/types'
 import {
   applyView,
   buildPalmMarks,
+  canvasToView,
   handViewTransform,
   marksToSourceSpace,
   marksToViewSpace,
+  sourcePointMapper,
   type PalmMark,
 } from '../overlay'
 import { CANVAS, CANVAS_ANCHORS, MOUNTS } from '../landmarks'
 import { applyHomography, findHomography } from '@/cv/homography'
 import type { P2 } from '@/core/geom'
-import type { LineMeasure } from '../palmlines'
+import { rankCandidates, type LineMeasure } from '../palmlines'
 import { applyHandRules, type HandRuleInput } from '../rules'
 
 /** 造一条从 (x0,y0) 到 (x1,y1) 的直线，点距均匀 */
@@ -389,5 +391,89 @@ describe('取景', () => {
     expect(a.anchor).not.toBeNull()
     expect(a.path![0]).not.toEqual(onHand.path![0])
     expect(b.anchor).toBeNull()
+  })
+})
+
+/* ============================================================
+   候选排序（在这个文件里，因为它纯属排版：只决定界面先给你看哪几条）
+   ============================================================ */
+
+describe('候选排序', () => {
+  /** 造一条水平折线，并把沿线响应涂成 value */
+  const seg = (x0: number, x1: number, y: number) => {
+    const pts: P2[] = []
+    for (let x = x0; x <= x1; x += 2) pts.push({ x, y })
+    return { points: pts, length: x1 - x0 }
+  }
+  const paint = (segs: { points: P2[] }[], values: number[]) => {
+    const r = new Float32Array(CANVAS.W * CANVAS.H)
+    segs.forEach((s, i) => {
+      for (const p of s.points) r[Math.round(p.y) * CANVAS.W + Math.round(p.x)] = values[i]
+    })
+    return r
+  }
+
+  const longStrong = seg(60, 400, 100)
+  const shortStrong = seg(60, 100, 200)
+  const longWeak = seg(60, 400, 300)
+
+  it('又长又清楚的排在前面 —— 短而强、长而虚都压得住', () => {
+    const cands = [shortStrong, longWeak, longStrong]
+    const res = paint(cands, [0.9 * 255, 0.1 * 255, 0.8 * 255])
+    const ranked = rankCandidates(cands, res, 10)
+    expect(ranked[0].points.length).toBe(longStrong.points.length)
+    // 显著度严格递减
+    for (let i = 1; i < ranked.length; i++) {
+      expect(ranked[i].strength).toBeLessThanOrEqual(ranked[i - 1].strength)
+    }
+  })
+
+  it('只留最靠前的若干条', () => {
+    const cands = Array.from({ length: 40 }, (_, i) => seg(60, 100 + i, 50 + i * 4))
+    const ranked = rankCandidates(cands, paint(cands, cands.map(() => 0.5 * 255)), 12)
+    expect(ranked).toHaveLength(12)
+  })
+
+  it('交回的点仍是标准画布坐标，原样不动 —— 度量层只认那个帧', () => {
+    const ranked = rankCandidates([longStrong], paint([longStrong], [0.8 * 255]), 5)
+    expect(ranked[0].points).toEqual(longStrong.points)
+  })
+
+  it('没有候选就返回空，不编一条出来', () => {
+    expect(rankCandidates([], new Float32Array(CANVAS.W * CANVAS.H), 12)).toEqual([])
+  })
+})
+
+describe('画布 → 展示画面 的复合映射', () => {
+  it('与「先映回原图、再取景」两步分开算的结果一致', () => {
+    const SRC = [
+      { x: 380, y: 500 },
+      { x: 710, y: 550 },
+      { x: 500, y: 920 },
+      { x: 500, y: 470 },
+    ]
+    const H = findHomography(SRC, [
+      CANVAS_ANCHORS.indexMcp,
+      CANVAS_ANCHORS.pinkyMcp,
+      CANVAS_ANCHORS.wrist,
+      CANVAS_ANCHORS.middleMcp,
+    ])
+    const frame = { H, mirrored: false, srcWidth: 1000, srcHeight: 1000, scale: 1 }
+    const lmPx: P2[] = Array.from({ length: 21 }, (_, i) => ({
+      x: 300 + ((i * 37) % 400),
+      y: 250 + ((i * 53) % 600),
+    }))
+    lmPx[0] = { x: 500, y: 920 }
+    lmPx[9] = { x: 500, y: 470 }
+    const view = handViewTransform(lmPx, 900)
+
+    const composed = canvasToView(frame, view)
+    const stepwise = sourcePointMapper(frame)
+    for (const p of [{ x: 100, y: 100 }, { x: 256, y: 256 }, { x: 400, y: 380 }]) {
+      const a = composed(p)
+      const b = applyView(view, stepwise(p))
+      expect(a.x).toBeCloseTo(b.x, 9)
+      expect(a.y).toBeCloseTo(b.y, 9)
+    }
   })
 })

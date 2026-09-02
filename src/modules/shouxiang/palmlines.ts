@@ -294,3 +294,52 @@ export function measureCorrected(
 }
 
 export { PRIORS }
+
+/* ============================================================
+   候选纹路的排序
+   ============================================================ */
+
+export interface RankedCandidate {
+  points: P2[]
+  length: number
+  /** 显著度，仅用于排序与取舍 —— 不参与任何度量或断语 */
+  strength: number
+}
+
+/**
+ * 把候选折线按显著度排序，只留最靠前的若干条。
+ *
+ * ── 为什么要这一步 ─────────────────────────────────────
+ * 校正界面原先把**全部**候选都画出来让用户点。实测一张手掌照上有几十条，
+ * 绝大多数是几像素长的碎纹。「请指出生命线」在那种图上是答不出来的：
+ * 真线未必在里面，而干扰项有五十个。
+ *
+ * ── 显著度怎么定 ───────────────────────────────────────
+ * 主线的特征是**又长又清楚**，所以取「沿线平均响应 × 相对掌宽的长度」。
+ * 只用响应会让强而短的边缘（例如手的轮廓）冒头；只用长度会让长而虚的
+ * 噪声链冒头；相乘两头都压得住。
+ *
+ * ⚠️ 这是**排版**决定，不是判断：它只影响界面上先给你看哪几条，
+ * 不改任何度量、不进任何断语。挑多挑少，读出来的东西一模一样。
+ */
+export function rankCandidates(
+  candidates: { points: P2[]; length: number }[],
+  response: Float32Array,
+  limit: number,
+): RankedCandidate[] {
+  const scored = candidates.map((c) => {
+    let sum = 0
+    let n = 0
+    for (const p of c.points) {
+      const x = Math.round(p.x)
+      const y = Math.round(p.y)
+      if (x < 0 || y < 0 || x >= CANVAS.W || y >= CANVAS.H) continue
+      sum += response[y * CANVAS.W + x]
+      n++
+    }
+    const depth = n ? Math.min(1, sum / n / 255) : 0
+    return { points: c.points, length: c.length, strength: depth * (c.length / PALM_WIDTH_PX) }
+  })
+  scored.sort((a, b) => b.strength - a.strength)
+  return scored.slice(0, limit)
+}

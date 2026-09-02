@@ -146,15 +146,25 @@ export interface SourceFrame {
  * 掌丘中心是定义在画布上的比例点，映回去有可能落到手外；那种情况不落标号
  * （返回 anchor = null），宁可不标也不指错地方。
  */
-export function marksToSourceSpace(marks: PalmMark[], frame: SourceFrame): PalmMark[] {
+/**
+ * 「标准画布 → 原照片」的点映射器。
+ *
+ * 抽出来是因为报告页与校正界面都要用它。两处各写一遍这段数学，
+ * 迟早有一处改了另一处没改 —— 那时候图上画的线和用户点到的线会错开，
+ * 而且不报错。
+ */
+export function sourcePointMapper(frame: SourceFrame): (p: P2) => P2 {
   const Hinv = invertHomography(frame.H)
-
-  const back = (p: P2): P2 => {
+  return (p: P2): P2 => {
     const q = applyHomography(Hinv, p)
     // 撤掉左手那一次水平镜像，再按展示尺寸缩放
     const x = frame.mirrored ? frame.srcWidth - 1 - q.x : q.x
     return { x: x * frame.scale, y: q.y * frame.scale }
   }
+}
+
+export function marksToSourceSpace(marks: PalmMark[], frame: SourceFrame): PalmMark[] {
+  const back = sourcePointMapper(frame)
 
   const W = frame.srcWidth * frame.scale
   const Hh = frame.srcHeight * frame.scale
@@ -284,4 +294,15 @@ export function marksToViewSpace(marks: PalmMark[], v: HandView): PalmMark[] {
       ...(path ? { path } : {}),
     }
   })
+}
+
+/**
+ * 「标准画布 → 展示画面」的点映射器，即上面两步的复合。
+ *
+ * 校正界面要用它：内部仍以标准画布坐标记录用户指认的线（度量层只认那个帧），
+ * 但画出来、点上去都在扶正取景后的画面里。
+ */
+export function canvasToView(frame: SourceFrame, view: HandView): (p: P2) => P2 {
+  const toSource = sourcePointMapper(frame)
+  return (p: P2) => applyView(view, toSource(p))
 }
