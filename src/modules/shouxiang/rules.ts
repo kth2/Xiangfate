@@ -21,6 +21,8 @@ import {
 import type {
   Classic,
   FeatureCategory,
+  HandContrast,
+  HandContrastItem,
   HandType,
   LineDetection,
   MountBand,
@@ -43,8 +45,13 @@ export interface HandRuleInput {
   detectorScore: number
   handedness: 'Left' | 'Right'
   dominantHand: 'left' | 'right' | null
-  /** 双手都采集时，另一只手的综合分 */
-  otherHandScore?: number | null
+  /**
+   * 另一只手的主线度量。双手都采集时给出，用来做先天／后天逐线对照。
+   * 只要线的度量，不需要再跑一遍规则 —— 断语仍只出自惯用手那只。
+   */
+  otherHandLines?: Map<PalmLineName, LineMeasure> | null
+  /** 另一只手是哪只 */
+  otherHandSide?: 'left' | 'right' | null
   handsCaptured: ('left' | 'right')[]
 }
 
@@ -52,8 +59,6 @@ export interface HandRuleOutput {
   features: import('@/core/types').FeatureItem[]
   unavailable: UnavailableItem[]
   derived: ShouxiangDerived
-  /** 本手的综合分，供左右手对照 */
-  overallScore: number
 }
 
 const ALL_LINES: PalmLineName[] = ['生命线', '智慧线', '感情线', '命运线', '太阳线', '婚姻线']
@@ -208,15 +213,14 @@ export function applyHandRules(input: HandRuleInput): HandRuleOutput {
     mountProfile[key as MountName] = mounts[key].band
   }
 
-  const overallScore = scoreHand(lines)
-  let comparison: ShouxiangDerived['leftRightComparison'] = null
-  if (input.otherHandScore != null && input.handsCaptured.length === 2) {
-    const diff = overallScore - input.otherHandScore
-    const thisIsRight = input.handedness === 'Right'
-    if (Math.abs(diff) <= T.handDiff) comparison = '左右相似'
-    else if (diff > 0) comparison = thisIsRight ? '右优于左' : '左优于右'
-    else comparison = thisIsRight ? '左优于右' : '右优于左'
-  }
+  /**
+   * 先天／后天逐线对照。
+   *
+   * 三个条件缺一不做：双手都采集、用户答了惯用手、这条线两手都测到。
+   * 尤其是惯用手 —— 没有它就分不清哪只是「行事之手」，
+   * 硬按左右分派会让左撇子拿到一份说反了的报告。
+   */
+  const handContrast = buildContrast(input, lines)
 
   const derived: ShouxiangDerived = {
     handType: {
@@ -228,11 +232,11 @@ export function applyHandRules(input: HandRuleInput): HandRuleOutput {
     dominantHand: input.dominantHand,
     handsCaptured: input.handsCaptured,
     lineDetection,
-    leftRightComparison: comparison,
+    handContrast,
     mountProfile,
   }
 
-  return { features, unavailable: [...unavailable, ...lowConf], derived, overallScore }
+  return { features, unavailable: [...unavailable, ...lowConf], derived }
 }
 
 /* ============================================================ */
@@ -254,6 +258,54 @@ const MOUNT_ID: Record<MountKey, string> = {
  * 迟早会有一处改了另一处没改 —— 那时候图上的号会静静地取不到任何词，
  * 不报错，只是空着。所以两边都调这里。
  */
+/**
+ * 造先天／后天对照。
+ *
+ * 惯用手 = 后天（行事之手），非惯用手 = 先天。差值一律「后天 − 先天」，
+ * 因此正值读作「这一路后天用了力」，负值读作「先天有而后天未及」。
+ *
+ * ⚠️ 不出「优／劣」。两手之间讲的是差异，不是胜负 ——
+ * 把长度、深浅、连续性揉成一个分再比大小，那是排行榜，不是相法。
+ */
+function buildContrast(
+  input: HandRuleInput,
+  dominantLines: Map<PalmLineName, LineMeasure>,
+): HandContrast | null {
+  const other = input.otherHandLines
+  const dominant = input.dominantHand
+  if (!other || !dominant || input.handsCaptured.length < 2) return null
+
+  // 惯用手必须真的在这次采集里，否则「后天」无从对应
+  if (!input.handsCaptured.includes(dominant)) return null
+
+  const innateSide: 'left' | 'right' = dominant === 'left' ? 'right' : 'left'
+  const items: HandContrastItem[] = []
+
+  for (const name of ALL_LINES) {
+    const acquired = dominantLines.get(name)
+    const innate = other.get(name)
+    // 一只手没测到这条线就不比 —— 缺项不判，与其他各处同一个规矩
+    if (!acquired || !innate) continue
+    const dLengthRatio = round(acquired.lengthRatio - innate.lengthRatio, 3)
+    const dDepth = round(acquired.depth - innate.depth, 3)
+    const dContinuity = round(acquired.continuity - innate.continuity, 3)
+    items.push({
+      line: name,
+      dLengthRatio,
+      dDepth,
+      dContinuity,
+      // 任一分量的差超过判线就算值得一说
+      notable:
+        Math.abs(dLengthRatio) > T.handDiff ||
+        Math.abs(dDepth) > T.handDiff ||
+        Math.abs(dContinuity) > T.handDiff,
+    })
+  }
+
+  if (!items.length) return null
+  return { dominant, innateSide, items }
+}
+
 export const lineFeatureId = (name: PalmLineName): string => `hand.line.${LINE_ID[name]}`
 export const mountFeatureId = (key: MountKey): string => `hand.mount.${MOUNT_ID[key]}`
 
@@ -437,14 +489,3 @@ function classifyHandType(m: HandMetrics): {
   }
 }
 
-/** 主线综合分，仅用于左右手对照 */
-function scoreHand(lines: Map<PalmLineName, LineMeasure>): number {
-  const main: PalmLineName[] = ['生命线', '智慧线', '感情线', '命运线']
-  let sum = 0
-  for (const n of main) {
-    const L = lines.get(n)
-    if (!L) continue
-    sum += (Math.min(1.2, L.lengthRatio) / 1.2) * 0.4 + L.depth * 0.3 + L.continuity * 0.3
-  }
-  return +(sum / main.length).toFixed(3)
-}

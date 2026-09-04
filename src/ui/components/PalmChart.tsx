@@ -1,7 +1,9 @@
 import { useMemo } from 'react'
-import type { FeatureItem, UnavailableItem } from '@/core/types'
+import type { FeatureItem, HandContrast, UnavailableItem } from '@/core/types'
 import type { PalmOverlay } from '@/store/analysis.store'
 import { PalmAnnotated } from './PalmAnnotated'
+
+const SIDE_LABEL = { left: '左手', right: '右手' } as const
 
 /**
  * 掌纹标注图 + 逐条对号解读。
@@ -14,6 +16,43 @@ import { PalmAnnotated } from './PalmAnnotated'
  * 没测到的线照样占一个号，如实写「未测到」。宁可空着，也不凑满十条。
  */
 export function PalmChart({
+  overlays,
+  features,
+  unavailable,
+  contrast,
+  accent,
+}: {
+  /** 每只手一份。断语只出自惯用手那只 */
+  overlays: PalmOverlay[]
+  features: FeatureItem[]
+  unavailable: UnavailableItem[]
+  /** 先天／后天逐线对照；缺条件时为 null */
+  contrast: HandContrast | null | undefined
+  accent: string
+}) {
+  /**
+   * 带标号列表的那一只：优先惯用手（论后天），没答惯用手就取第一只。
+   * 断语全部出自它 —— 另一只手只描线，不复用它的读数。
+   */
+  const primary = overlays.find((o) => o.role === '后天') ?? overlays[0]
+  const others = overlays.filter((o) => o !== primary)
+  if (!primary) return null
+  return (
+    <>
+      <PrimaryChart
+        overlay={primary}
+        features={features}
+        unavailable={unavailable}
+        accent={accent}
+      />
+      {others.map((o) => (
+        <OtherHandChart key={o.side} overlay={o} contrast={contrast} accent={accent} />
+      ))}
+    </>
+  )
+}
+
+function PrimaryChart({
   overlay,
   features,
   unavailable,
@@ -42,7 +81,10 @@ export function PalmChart({
   return (
     <section className="card overflow-hidden">
       <div className="p-4 pb-3">
-        <h2 className="font-title mb-1 text-sm tracking-[0.2em]">掌纹标注</h2>
+        <h2 className="font-title mb-1 text-sm tracking-[0.2em]">
+          掌纹标注 · {SIDE_LABEL[overlay.side]}
+          {overlay.role && <span className="ml-2 text-[11px] text-subtle">论{overlay.role}</span>}
+        </h2>
         <p className="text-[11px] leading-relaxed text-subtle">
           取自你那张照片，已裁到手掌并扶正。图上 {marked} 处标号对应下方条目，
           实心号为掌线，空心号为掌丘。断语与释义均来自本次实测，未经 AI 改写。
@@ -112,3 +154,80 @@ export function PalmChart({
     </section>
   )
 }
+
+/**
+ * 另一只手。
+ *
+ * 它**不重复**惯用手的断语 —— 那些断语是从惯用手量出来的，搬过来就是张冠李戴。
+ * 这里只做两件事：把它自己的掌纹描出来，以及列出与惯用手之间的逐线差异。
+ * 传统的左右手对照讲的正是这个差，不是哪只手更好。
+ */
+function OtherHandChart({
+  overlay,
+  contrast,
+  accent,
+}: {
+  overlay: PalmOverlay
+  contrast: HandContrast | null | undefined
+  accent: string
+}) {
+  const notable = contrast?.items.filter((i) => i.notable) ?? []
+
+  return (
+    <section className="card overflow-hidden">
+      <div className="p-4 pb-3">
+        <h2 className="font-title mb-1 text-sm tracking-[0.2em]">
+          另一手 · {SIDE_LABEL[overlay.side]}
+          {overlay.role && <span className="ml-2 text-[11px] text-subtle">论{overlay.role}</span>}
+        </h2>
+        <p className="text-[11px] leading-relaxed text-subtle">
+          这一只只描纹、不另出断语 —— 断语是从惯用手量出来的，搬过来就不是它了。
+          掌丘也不标：饱满度只算了惯用手一只。
+        </p>
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)' }}>
+        <PalmAnnotated overlay={overlay} accent={accent} />
+      </div>
+
+      <div className="p-4">
+        <h3 className="font-title mb-2 text-[13px] tracking-[0.1em]">先天与后天之差</h3>
+        {!contrast ? (
+          <p className="text-[12px] leading-relaxed text-muted">
+            对照暂缺 —— 需要两只手都拍到，且答了哪只是惯用手。没有惯用手就分不清
+            哪只论后天，硬按左右分派会把话说反。
+          </p>
+        ) : notable.length === 0 ? (
+          <p className="text-[12px] leading-relaxed text-muted">
+            两手可对照的 {contrast.items.length} 条主线差异都不显著 ——
+            传统读作先天与后天相去不远，本色与所为大致一路。
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2.5">
+            {notable.map((i) => (
+              <li key={i.line} className="text-[12px] leading-relaxed">
+                <span className="font-title tracking-[0.08em]">{i.line}</span>
+                <span className="text-muted">
+                  　{describeDelta(i.dLengthRatio, '长')}
+                  {describeDelta(i.dDepth, '深')}
+                  {describeDelta(i.dContinuity, '连续')}
+                </span>
+                <span className="ml-1 text-[11px] text-subtle">
+                  （后天 − 先天：长 {fmt(i.dLengthRatio)}、深 {fmt(i.dDepth)}、连续 {fmt(i.dContinuity)}）
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/** 只把够显著的那一项说成话，避免把三个小数都念一遍 */
+function describeDelta(d: number, what: string): string {
+  if (Math.abs(d) < 0.1) return ''
+  return d > 0 ? `惯用手更${what}　` : `另一手更${what}　`
+}
+
+const fmt = (v: number): string => (v > 0 ? `+${v.toFixed(2)}` : v.toFixed(2))

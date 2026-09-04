@@ -29,6 +29,10 @@ export interface CapturedShot {
  * 从历史记录打开的报告拿不到它 —— 那是对的，照片本来就没有被保存。
  */
 export interface PalmOverlay {
+  /** 这是哪只手 */
+  side: 'left' | 'right'
+  /** 惯用手（论后天）还是另一只（论先天）；用户没答惯用手时为 null */
+  role: '后天' | '先天' | null
   image: ImageData
   marks: PalmMark[]
 }
@@ -39,8 +43,11 @@ interface AnalysisState {
   shots: CapturedShot[]
   subject: Subject
   envelope: AnalysisEnvelope | null
-  /** 手相专用：报告页的掌图标注。只在本次会话内有效 */
-  palmOverlay: PalmOverlay | null
+  /**
+   * 手相专用：报告页的掌图标注，**每只手一份**。只在本次会话内有效。
+   * 原先只存一份，于是拍了两只手也只看得到一只 —— 那让第二张照片白拍了。
+   */
+  palmOverlays: PalmOverlay[]
   /** AI 生成的报告正文（流式累积） */
   report: string
   error: string | null
@@ -52,7 +59,7 @@ interface AnalysisState {
   setSubject: (patch: Partial<Subject>) => void
   setPhase: (phase: Phase) => void
   setEnvelope: (envelope: AnalysisEnvelope) => void
-  setPalmOverlay: (overlay: PalmOverlay | null) => void
+  setPalmOverlays: (overlays: PalmOverlay[]) => void
   appendReport: (chunk: string) => void
   setReport: (report: string) => void
   setError: (error: string | null) => void
@@ -76,7 +83,7 @@ export const useAnalysis = create<AnalysisState>((set, get) => ({
   shots: [],
   subject: { gender: 'unspecified', isSelf: true, focusTopics: [] },
   envelope: null,
-  palmOverlay: null,
+  palmOverlays: [],
   report: '',
   error: null,
 
@@ -105,7 +112,7 @@ export const useAnalysis = create<AnalysisState>((set, get) => ({
   setSubject: (patch) => set((s) => ({ subject: { ...s.subject, ...patch } })),
   setPhase: (phase) => set({ phase }),
   setEnvelope: (envelope) => set({ envelope }),
-  setPalmOverlay: (palmOverlay) => set({ palmOverlay }),
+  setPalmOverlays: (palmOverlays) => set({ palmOverlays }),
   appendReport: (chunk) => set((s) => ({ report: s.report + chunk })),
   setReport: (report) => set({ report }),
   setError: (error) => set({ error, phase: error ? 'error' : get().phase }),
@@ -124,7 +131,7 @@ export const useAnalysis = create<AnalysisState>((set, get) => ({
       shots: [],
       subject: { gender: 'unspecified', isSelf: true, focusTopics: [] },
       envelope: null,
-      palmOverlay: null,
+      palmOverlays: [],
       report: '',
       error: null,
     })

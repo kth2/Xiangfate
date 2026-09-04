@@ -36,8 +36,11 @@ import {
   marksToViewSpace,
   type SourceFrame,
 } from '@/modules/shouxiang/overlay'
+import { MOUNTS } from '@/modules/shouxiang/landmarks'
 import type {
   AnalysisEnvelope,
+  MountBand,
+  MountName,
   PalmLineName,
   ShotKind,
   ShouxiangDerived,
@@ -47,6 +50,7 @@ import { CAPTURE_PRIVACY } from '@/copy/disclaimer.zh-CN'
 import { HAND_CONNECTIONS, LandmarkOverlay, POSE_CONNECTIONS } from '../components/LandmarkOverlay'
 import { PalmLineCorrector } from '../components/PalmLineCorrector'
 import { BodySurvey } from '../components/BodySurvey'
+import { HandednessPicker } from '../components/HandednessPicker'
 
 type Stage =
   | 'intro'
@@ -101,6 +105,11 @@ function buildPalmView(shot: HandShot, a: PalmAnalysis) {
   return { view, frame, image: renderAffineImageData(shot.bitmap, view) }
 }
 
+/** 全为中和的掌丘档位 —— buildPalmMarks 只收偏离中和的，因此等于「一个丘都不标」 */
+const NO_MOUNTS = Object.fromEntries(
+  (Object.keys(MOUNTS) as MountName[]).map((k) => [k, 'balanced' as MountBand]),
+) as Record<MountName, MountBand>
+
 export function Capture() {
   const { type } = useParams()
   const navigate = useNavigate()
@@ -108,8 +117,9 @@ export function Capture() {
 
   const start = useAnalysis((s) => s.start)
   const setEnvelope = useAnalysis((s) => s.setEnvelope)
-  const setPalmOverlay = useAnalysis((s) => s.setPalmOverlay)
+  const setPalmOverlays = useAnalysis((s) => s.setPalmOverlays)
   const subject = useAnalysis((s) => s.subject)
+  const setSubject = useAnalysis((s) => s.setSubject)
 
   const [stage, setStage] = useState<Stage>(spec?.caveat ? 'intro' : 'pick')
   const [shotIndex, setShotIndex] = useState(0)
@@ -444,7 +454,13 @@ export function Capture() {
           }
 
           env = buildShouxiangEnvelope(
-            { shots: handShots, subject, dominantHand: handShots[0].side, corrections: correctionsRef.current },
+            {
+              shots: handShots,
+              subject,
+              // 用户答的惯用手；没答就是 null，规则层据此不做先天后天分派
+              dominantHand: subject.dominantHand ?? null,
+              corrections: correctionsRef.current,
+            },
             palmAnalysesRef.current,
           )
 
@@ -460,20 +476,41 @@ export function Capture() {
            *
            * 只放进内存 store，不落库：照片本来就不保存。
            */
-          const shown = palmView ?? buildPalmView(handShots[0], primary)
-          setPalmOverlay({
-            image: shown.image,
-            marks: marksToViewSpace(
-              marksToSourceSpace(
-                buildPalmMarks(
-                  resolvePalmLines(primary, correctionsRef.current),
-                  (env.derived as ShouxiangDerived).mountProfile,
+          /**
+           * 每只手一张标注图。断语只出自惯用手那只，但两只都拍了就两只都给看 ——
+           * 拍了不给看，第二张照片就白拍了。
+           */
+          const dom = subject.dominantHand ?? null
+          setPalmOverlays(
+            handShots.map((shot, i) => {
+              const a = palmAnalysesRef.current[i]
+              // 惯用手那只如果正是校正界面用过的，直接复用它的取景图，别重算
+              const built =
+                a === primary && palmView ? palmView : buildPalmView(shot, a)
+              return {
+                side: a.side,
+                role: dom === null ? null : a.side === dom ? ('后天' as const) : ('先天' as const),
+                image: built.image,
+                marks: marksToViewSpace(
+                  marksToSourceSpace(
+                    buildPalmMarks(
+                      resolvePalmLines(a, a === primary ? correctionsRef.current : undefined),
+                      /**
+                       * 掌丘只在惯用手那只落标号。
+                       * 掌丘的饱满度只算了惯用手一只（computeMounts 只跑了它），
+                       * 把那份档位画到另一只手上，等于用这只手的读数去标那只手 ——
+                       * 宁可不标。另一只手只描线。
+                       */
+                      a === primary ? (env.derived as ShouxiangDerived).mountProfile : NO_MOUNTS,
+                    ),
+                    built.frame,
+                  ),
+                  built.view,
                 ),
-                shown.frame,
-              ),
-              shown.view,
-            ),
-          })
+              }
+            }),
+          )
+
           break
         }
       }
@@ -700,6 +737,17 @@ export function Capture() {
       <div className="rule-gold my-6" />
 
       <h2 className="font-title mb-4 text-lg tracking-[0.1em]">{currentShot!.title}</h2>
+
+      {/* 惯用手：只有手相要问，且在第一张之前问 —— 它决定哪只手论后天 */}
+      {type === 'shouxiang' && shotIndex === 0 && (
+        <div className="mb-6">
+          <HandednessPicker
+            value={subject.dominantHand}
+            accent={spec.accent}
+            onChange={(v) => setSubject({ dominantHand: v })}
+          />
+        </div>
+      )}
 
       <ul className="mb-6 flex flex-col gap-2.5">
         {currentShot!.tips.map((t) => (

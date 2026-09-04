@@ -8,7 +8,7 @@ import { useAnalysis } from '@/store/analysis.store'
 import { useSettings } from '@/store/settings.store'
 import { BANNER, CARE_CARD, FULL_DISCLAIMER, SHORT_DISCLAIMER } from '@/copy/disclaimer.zh-CN'
 import { PRESET_HINT, presetsFor } from '@/copy/questions.zh-CN'
-import type { AnalysisEnvelope } from '@/core/types'
+import type { AnalysisEnvelope, ShouxiangDerived } from '@/core/types'
 import { Markdown } from '../components/Markdown'
 import { ScoreCardView } from '../components/ScoreCard'
 import { FeatureList } from '../components/FeatureList'
@@ -33,7 +33,7 @@ export function Report() {
    * 掌图只在本次会话内有效 —— 照片不落库，从历史记录打开就没有。
    * 那种情况下这一栏整块不出现，文字部分照常。
    */
-  const palmOverlay = useAnalysis((s) => s.palmOverlay)
+  const palmOverlays = useAnalysis((s) => s.palmOverlays)
   const reset = useAnalysis((s) => s.reset)
 
   const { provider: providerId, configs } = useSettings()
@@ -283,11 +283,16 @@ export function Report() {
           accent={accent}
         />
 
-        {palmOverlay && (
+        {palmOverlays.length > 0 && (
           <PalmChart
-            overlay={palmOverlay}
+            overlays={palmOverlays}
             features={envelope.features}
             unavailable={envelope.unavailable}
+            contrast={
+              envelope.analysisType === 'shouxiang'
+                ? (envelope.derived as ShouxiangDerived).handContrast
+                : null
+            }
             accent={accent}
           />
         )}

@@ -100,6 +100,27 @@ export function resolvePalmLines(
   return lines
 }
 
+/**
+ * 断语出自哪只手。
+ *
+ * 取**惯用手**（行事之手，相书所谓后天），这样报告正文讲的是「你现在的样子」。
+ * 用户没答惯用手，或答的那只这次没拍到，就退回第一张 ——
+ * 退回时 handContrast 会是 null，报告里如实说对照暂缺，不硬分先天后天。
+ *
+ * ⚠️ 这里原先写的是 `input.dominantHand ?? analyses[0].side`，
+ * 而调用方传的 dominantHand 恰恰就是 `handShots[0].side` —— 于是「惯用手」
+ * 永远等于第一张照片那只手。左撇子会被当成右利手处理，且毫无提示。
+ * 抽成导出函数是为了让这条能被测试钉住，不必造位图。
+ */
+export function pickPrimaryIndex(
+  analyses: { side: 'left' | 'right' }[],
+  dominantHand: 'left' | 'right' | null,
+): number {
+  if (!dominantHand) return 0
+  const i = analyses.findIndex((a) => a.side === dominantHand)
+  return i >= 0 ? i : 0
+}
+
 /** 第二步：把（可能经过校正的）分析结果拼成 envelope */
 export function buildShouxiangEnvelope(
   input: BuildHandInput,
@@ -107,11 +128,7 @@ export function buildShouxiangEnvelope(
 ): AnalysisEnvelope {
   if (!analyses.length) throw new Error('没有可用的手掌分析结果')
 
-  // 主手：优先惯用手，否则第一张
-  const primaryIdx = Math.max(
-    0,
-    analyses.findIndex((a) => a.side === (input.dominantHand ?? analyses[0].side)),
-  )
+  const primaryIdx = pickPrimaryIndex(analyses, input.dominantHand ?? null)
   const primary = analyses[primaryIdx]
   const primaryShot = input.shots[primaryIdx] ?? input.shots[0]
 
@@ -135,9 +152,13 @@ export function buildShouxiangEnvelope(
   const { mounts } = computeMounts(primary.normalized)
 
   const handsCaptured = [...new Set(analyses.map((a) => a.side))]
+
+  /**
+   * 另一只手。两手都拍时，它的主线度量原样传进规则层做逐线对照 ——
+   * 不再压成一个综合分去比大小。断语仍只出自惯用手那只。
+   */
   const otherIdx = analyses.findIndex((_, i) => i !== primaryIdx)
-  const otherScore =
-    otherIdx >= 0 ? scoreOf(analyses[otherIdx].lines) : null
+  const other = otherIdx >= 0 ? analyses[otherIdx] : null
 
   const { features, unavailable, derived } = applyHandRules({
     m,
@@ -147,7 +168,8 @@ export function buildShouxiangEnvelope(
     detectorScore: primaryShot.detection.detectorScore,
     handedness: primaryShot.detection.handedness?.label ?? 'Right',
     dominantHand: input.dominantHand ?? null,
-    otherHandScore: otherScore,
+    otherHandLines: other ? other.lines : null,
+    otherHandSide: other ? other.side : null,
     handsCaptured,
   })
 
@@ -185,17 +207,6 @@ export function buildShouxiangEnvelope(
     scorecard: computeScorecard(features),
     policy: { disclaimerRequired: true, forbidTopics: [...DEFAULT_FORBID_TOPICS] },
   }
-}
-
-function scoreOf(lines: Map<PalmLineName, LineMeasure>): number {
-  const main: PalmLineName[] = ['生命线', '智慧线', '感情线', '命运线']
-  let sum = 0
-  for (const n of main) {
-    const L = lines.get(n)
-    if (!L) continue
-    sum += (Math.min(1.2, L.lengthRatio) / 1.2) * 0.4 + L.depth * 0.3 + L.continuity * 0.3
-  }
-  return +(sum / main.length).toFixed(3)
 }
 
 /** 有主线没测到就该进校正界面 */

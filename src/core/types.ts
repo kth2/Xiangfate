@@ -125,6 +125,15 @@ export interface Subject {
   gender?: 'male' | 'female' | 'unspecified'
   isSelf?: boolean
   focusTopics?: string[]
+  /**
+   * 惯用手。手相专用，且**必须由用户回答**，不能从拍摄顺序猜。
+   *
+   * 为什么要问：相书说「左手先天、右手后天」，而给出的理由是右手是行事之手。
+   * 对左撇子，这个理由指向的是左手。不问就等于默认所有人都是右利手 ——
+   * 左撇子会拿到一份把先天与后天说反了的报告，而且不会有任何提示。
+   * null = 没问到／用户不确定，此时不做先天后天的分派。
+   */
+  dominantHand?: 'left' | 'right' | null
 }
 
 /**
@@ -242,6 +251,31 @@ export interface LineDetection {
   corrected: boolean
 }
 
+/**
+ * 一条主线在两手之间的差。
+ *
+ * 惯用手记为「后天」，非惯用手记为「先天」—— 依据是相书对右手主后天给出的
+ * 理由（行事之手），该理由随利手而转。
+ */
+export interface HandContrastItem {
+  line: PalmLineName
+  /** 后天（惯用手）− 先天（非惯用手）。正值表示惯用手那条更长／更深／更连续 */
+  dLengthRatio: number
+  dDepth: number
+  dContinuity: number
+  /** 差异是否大到值得一说。判线见 shouxiang/thresholds.ts 的 handDiff */
+  notable: boolean
+}
+
+export interface HandContrast {
+  /** 用户回答的惯用手 */
+  dominant: 'left' | 'right'
+  /** 先天所在的那只手（即非惯用手） */
+  innateSide: 'left' | 'right'
+  /** 两手都测到、因而可对照的线 */
+  items: HandContrastItem[]
+}
+
 export interface ShouxiangDerived {
   handType: {
     primary: HandType
@@ -253,8 +287,18 @@ export interface ShouxiangDerived {
   handsCaptured: ('left' | 'right')[]
   lineDetection: Partial<Record<PalmLineName, LineDetection>> &
     Record<'生命线' | '智慧线' | '感情线' | '命运线', LineDetection>
-  /** 仅双手都采集时给出；否则 null，且 AI 须说明对照暂缺 */
+  /**
+   * @deprecated 只为读出旧记录而留。
+   *
+   * 它把两手压成一个「优／劣」，而传统的左右手对照讲的是先天与后天之间的**差异**，
+   * 不是哪只手赢。新记录一律写 handContrast，不再写这个字段。
+   */
   leftRightComparison?: '右优于左' | '左优于右' | '左右相似' | null
+  /**
+   * 先天／后天逐线对照。仅在双手都采集、且用户答了惯用手时给出。
+   * 缺任一条件即为 null，AI 须说明对照暂缺，不得推测。
+   */
+  handContrast?: HandContrast | null
   mountProfile: Record<MountName, MountBand>
 }
 
