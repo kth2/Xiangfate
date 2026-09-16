@@ -1,11 +1,17 @@
 /**
- * 手掌透视归一化：21 个关节点 → 标准掌画布。
+ * 手掌归一化：21 个关节点 → 标准掌画布。
  *
  * 左手会先做水平镜像，统一按右手朝向处理 —— 这样掌纹的位置先验
  * 只需要写一套。
+ *
+ * ⚠️ 用的是**最小二乘仿射**，不是单应。原因写在 cv/homography.ts 的 fitAffine 上：
+ * 可用锚点里三个 MCP 近共线，单应在这种配置下病态，实测会把整个大鱼际
+ * 甩出画布，并且中指 MCP 抖 2px 就能让画布上的点跑 150px。
+ * 矩阵仍是 Matrix3（末行 [0,0,1]），下游的 applyHomography / invertHomography /
+ * warpPerspective 一律照旧。
  */
 
-import { findHomography, warpPerspective, type Matrix3 } from '@/cv/homography'
+import { fitAffine, warpPerspective, type Matrix3 } from '@/cv/homography'
 import type { P2, P3 } from '@/core/geom'
 import { CANVAS, CANVAS_ANCHORS, HAND } from './landmarks'
 
@@ -49,7 +55,13 @@ export function normalizePalm(
     CANVAS_ANCHORS.middleMcp,
   ]
 
-  const H = findHomography(srcPts, dstPts)
+  /*
+   * 仿射而非单应 —— 见 cv/homography.ts 里 fitAffine 的那段说明。
+   * 一句话：四个锚点里有三个（食/中/小指 MCP）挤在指根一线上，
+   * 单应在这种配置下是病态的，实测把拇指根甩到画布外 1.7 个身位，
+   * 而金星丘与生命线的先验全写在那一块。
+   */
+  const H = fitAffine(srcPts, dstPts)
   const image = warpPerspective(working, H, CANVAS.W, CANVAS.H)
 
   return { image, H, mirrored }
