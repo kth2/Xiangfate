@@ -353,3 +353,124 @@ export function canvasToView(frame: SourceFrame, view: HandView): (p: P2) => P2 
   const toSource = sourcePointMapper(frame)
   return (p: P2) => applyView(view, toSource(p))
 }
+
+/* ============================================================
+   标签排版
+   ============================================================ */
+
+/** 一块已定位的标签牌（原照片坐标，左上角起算） */
+export interface PalmLabel {
+  mark: PalmMark
+  x: number
+  y: number
+  width: number
+  height: number
+  /** 牌子指向的那个点 —— 就是徽标落点，牌紧贴着它放 */
+  anchor: P2
+}
+
+export interface LabelMetrics {
+  /** 量一段文字有多宽（像素）。由调用方给，因为量文字要 canvas */
+  measure: (text: string) => number
+  fontSize: number
+  padX: number
+  padY: number
+  /** 牌子与锚点之间留的空隙 */
+  gap: number
+}
+
+/**
+ * 给每个标号排一块写着名目的牌子。
+ *
+ * 为什么不直接把牌子怼在锚点右边：掌线在掌心挤成一团，三四块牌子叠在一起谁都读不了。
+ * 这里按「右 → 左 → 上 → 下 → 右上 …」依次试位，取第一个既在画面内、
+ * 又不压到已放牌子的位置；实在都挤不开，就取重叠面积最小的那个 ——
+ * **宁可稍微压一点也要把名目写出来**，留空等于这条线白描了。
+ *
+ * 纯函数：位置只由锚点、画面尺寸和文字宽度决定，同样的输入永远排出同样的版。
+ */
+export function placeLabels(
+  marks: PalmMark[],
+  bounds: { width: number; height: number },
+  m: LabelMetrics,
+): PalmLabel[] {
+  const out: PalmLabel[] = []
+  const h = m.fontSize + m.padY * 2
+
+  for (const mark of marks) {
+    if (!mark.anchor) continue
+    const w = m.measure(labelText(mark)) + m.padX * 2
+    const a = mark.anchor
+
+    let best: { x: number; y: number; cost: number } | null = null
+    for (const [dx, dy] of CANDIDATES) {
+      // dx/dy 是方向：-1 表示牌子放在锚点的左/上侧
+      const x = a.x + (dx < 0 ? -w - m.gap : dx > 0 ? m.gap : -w / 2)
+      const y = a.y + (dy < 0 ? -h - m.gap : dy > 0 ? m.gap : -h / 2)
+
+      const outside = outsideArea({ x, y, width: w, height: h }, bounds)
+      const overlap = out.reduce((s, p) => s + rectOverlap({ x, y, width: w, height: h }, p), 0)
+      // 出界比压别的牌子更难读，权重给高一些
+      const cost = outside * 3 + overlap
+      if (cost === 0) {
+        best = { x, y, cost }
+        break
+      }
+      if (!best || cost < best.cost) best = { x, y, cost }
+    }
+
+    if (!best) continue
+    out.push({
+      mark,
+      // 挤不开时也要保证牌子整块在画面内，宁可压线也不跑出去
+      x: clamp(best.x, 0, Math.max(0, bounds.width - w)),
+      y: clamp(best.y, 0, Math.max(0, bounds.height - h)),
+      width: w,
+      height: h,
+      anchor: a,
+    })
+  }
+  return out
+}
+
+/** 牌子上的字：序号 + 名目。序号留着是为了和下方列表逐条对得上 */
+export function labelText(mark: PalmMark): string {
+  return `${mark.n} ${mark.name}`
+}
+
+/** 试位顺序：先左右（掌线多为竖向，左右不易压线），再上下，最后四个斜角 */
+const CANDIDATES: ReadonlyArray<readonly [number, number]> = [
+  [1, 0],
+  [-1, 0],
+  [0, -1],
+  [0, 1],
+  [1, -1],
+  [-1, -1],
+  [1, 1],
+  [-1, 1],
+]
+
+interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** 矩形越出画面的面积 */
+function outsideArea(r: Rect, b: { width: number; height: number }): number {
+  const inW = Math.max(0, Math.min(r.x + r.width, b.width) - Math.max(r.x, 0))
+  const inH = Math.max(0, Math.min(r.y + r.height, b.height) - Math.max(r.y, 0))
+  return r.width * r.height - inW * inH
+}
+
+/** 两矩形的重叠面积 */
+function rectOverlap(a: Rect, b: Rect): number {
+  const w = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))
+  const h = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y))
+  return w * h
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v))
+}
