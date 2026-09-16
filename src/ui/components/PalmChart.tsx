@@ -1,7 +1,8 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import type { FeatureItem, HandContrast, UnavailableItem } from '@/core/types'
 import type { PalmOverlay } from '@/store/analysis.store'
 import { PalmAnnotated } from './PalmAnnotated'
+import { colorOf } from '@/modules/shouxiang/palette'
 
 const SIDE_LABEL = { left: '左手', right: '右手' } as const
 
@@ -46,7 +47,7 @@ export function PalmChart({
         accent={accent}
       />
       {others.map((o) => (
-        <OtherHandChart key={o.side} overlay={o} contrast={contrast} accent={accent} />
+        <OtherHandChart key={o.side} overlay={o} contrast={contrast} />
       ))}
     </>
   )
@@ -77,33 +78,39 @@ function PrimaryChart({
   )
 
   const marked = overlay.marks.filter((m) => m.anchor).length
+  const { ref, save } = useSaveImage(overlay.side)
 
   return (
     <section className="card overflow-hidden">
       <div className="p-4 pb-3">
-        <h2 className="font-title mb-1 text-sm tracking-[0.2em]">
-          掌纹标注 · {SIDE_LABEL[overlay.side]}
-          {overlay.role && <span className="ml-2 text-[11px] text-subtle">论{overlay.role}</span>}
-        </h2>
+        <div className="mb-1 flex items-baseline justify-between gap-3">
+          <h2 className="font-title text-sm tracking-[0.2em]">
+            掌纹标注 · {SIDE_LABEL[overlay.side]}
+            {overlay.role && <span className="ml-2 text-[11px] text-subtle">论{overlay.role}</span>}
+          </h2>
+          <SaveImageButton onClick={save} />
+        </div>
         <p className="text-[11px] leading-relaxed text-subtle">
-          取自你那张照片，已裁到手掌并扶正。图上 {marked} 处标号对应下方条目，
-          实心号为掌线，空心号为掌丘。断语与释义均来自本次实测，未经 AI 改写。
+          取自你那张照片，已裁到手掌并扶正。图上 {marked} 处标注对应下方条目，
+          一条线一个颜色，号牌与列表同色。断语与释义均来自本次实测，未经 AI 改写。
         </p>
       </div>
 
       <div style={{ borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)' }}>
-        <PalmAnnotated overlay={overlay} accent={accent} />
+        <PalmAnnotated overlay={overlay} canvasRef={ref} />
       </div>
 
       <ol className="p-4">
         {rows.map(({ mark, items, missing }) => (
           <li key={`${mark.n}-${mark.featureId}`} className="mb-4 flex gap-3 last:mb-0">
+            {/* 号牌用的正是图上那条线的颜色 —— 颜色才是图与列表之间的索引，号只是备份 */}
             <span
               aria-hidden
               className="mt-[2px] flex h-[22px] w-[22px] shrink-0 items-center justify-center border text-[11px] leading-none"
               style={{
-                borderColor: mark.anchor ? accent : 'var(--line)',
-                color: mark.anchor ? accent : 'var(--fg-subtle)',
+                borderColor: mark.anchor ? colorOf(mark.name, mark.kind) : 'var(--line)',
+                background: mark.anchor ? colorOf(mark.name, mark.kind) : 'transparent',
+                color: mark.anchor ? '#fff' : 'var(--fg-subtle)',
                 borderRadius: mark.kind === 'mount' ? '50%' : 2,
               }}
             >
@@ -165,21 +172,23 @@ function PrimaryChart({
 function OtherHandChart({
   overlay,
   contrast,
-  accent,
 }: {
   overlay: PalmOverlay
   contrast: HandContrast | null | undefined
-  accent: string
 }) {
   const notable = contrast?.items.filter((i) => i.notable) ?? []
+  const { ref, save } = useSaveImage(overlay.side)
 
   return (
     <section className="card overflow-hidden">
       <div className="p-4 pb-3">
-        <h2 className="font-title mb-1 text-sm tracking-[0.2em]">
-          另一手 · {SIDE_LABEL[overlay.side]}
-          {overlay.role && <span className="ml-2 text-[11px] text-subtle">论{overlay.role}</span>}
-        </h2>
+        <div className="mb-1 flex items-baseline justify-between gap-3">
+          <h2 className="font-title text-sm tracking-[0.2em]">
+            另一手 · {SIDE_LABEL[overlay.side]}
+            {overlay.role && <span className="ml-2 text-[11px] text-subtle">论{overlay.role}</span>}
+          </h2>
+          <SaveImageButton onClick={save} />
+        </div>
         <p className="text-[11px] leading-relaxed text-subtle">
           这一只只描纹、不另出断语 —— 断语是从惯用手量出来的，搬过来就不是它了。
           掌丘也不标：饱满度只算了惯用手一只。
@@ -187,7 +196,7 @@ function OtherHandChart({
       </div>
 
       <div style={{ borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)' }}>
-        <PalmAnnotated overlay={overlay} accent={accent} />
+        <PalmAnnotated overlay={overlay} canvasRef={ref} />
       </div>
 
       <div className="p-4">
@@ -221,6 +230,45 @@ function OtherHandChart({
         )}
       </div>
     </section>
+  )
+}
+
+
+/**
+ * 「保存图片」。
+ *
+ * 加这个是因为标注图本身就是一张能拿去看、拿去问人的图 ——
+ * 截屏会连着界面一起截进去，导出的则是干净的那张。
+ *
+ * 画布里的内容自始至终来自本机：照片没有离开过设备，导出也只是把它存回相册。
+ */
+function useSaveImage(side: 'left' | 'right') {
+  const ref = useRef<HTMLCanvasElement>(null)
+  const save = useCallback(() => {
+    const canvas = ref.current
+    if (!canvas) return
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `掌纹标注-${SIDE_LABEL[side]}.png`
+      a.click()
+      URL.revokeObjectURL(url)
+    }, 'image/png')
+  }, [side])
+  return { ref, save }
+}
+
+function SaveImageButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="text-[11px] text-subtle underline"
+    >
+      保存图片
+    </button>
   )
 }
 
